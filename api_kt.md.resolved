@@ -1,0 +1,280 @@
+# REST API - Knowledge Transfer (KT)
+
+**API Root URL:** `https://asfancynumber.com/fancy_number/api.php`
+
+---
+
+## 1. Overview
+The API is designed as a dynamic CRUD (Create, Read, Update, Delete) interface. You can interact with any of the 17 allowed tables by appending the table name to the root URL.
+
+### Security
+The API contains a **whitelist**. Only the following tables can be accessed:
+`wp_users`, `wp_fn_dealers`, `wp_fn_number_types`, `wp_fn_number_categories`, `wp_fn_numbers`, `wp_fn_upload_batches`, `wp_fn_cart`, `wp_fn_orders`, `wp_fn_order_items`, `wp_fn_payments`, `wp_fn_sales_log`, `wp_fn_whatsapp_log`, `wp_fn_number_history`, `wp_fn_number_patterns`, `wp_fn_featured_numbers`, `wp_fn_dealer_sales`, `wp_fn_platform_commissions`.
+
+---
+
+## 2. API Endpoints & Usage
+
+### A. List Records (GET)
+Retrieve multiple records from a table.
+- **URL:** `[ROOT]/[table_name]`
+- **Example:** `https://asfancynumber.com/fancy_number/api.php/wp_fn_numbers`
+- **Optional Params:** `?limit=50&offset=0`
+
+### B. Get Single Record (GET)
+Retrieve a specific record by its primary key ID.
+- **URL:** `[ROOT]/[table_name]/[id]`
+- **Example:** `https://asfancynumber.com/fancy_number/api.php/wp_fn_numbers/101`
+
+### C. Create Record (POST)
+Insert a new row into a table.
+- **URL:** `[ROOT]/[table_name]`
+- **Method:** `POST`
+- **Body (JSON):**
+  ```json
+  {
+      "mobile_number": "9988776655",
+      "price": "5000.00",
+      "dealer_id": 1
+  }
+  ```
+
+### D. Update Record (PUT / PATCH)
+Modify an existing record by ID.
+- **URL:** `[ROOT]/[table_name]/[id]`
+- **Method:** `PUT` or `PATCH`
+- **Body (JSON):**
+  ```json
+  {
+      "price": "4500.00",
+      "status": "booked"
+  }
+  ```
+
+### E. Delete Record (DELETE)
+Permanently remove a record by ID.
+- **URL:** `[ROOT]/[table_name]/[id]`
+- **Method:** `DELETE`
+
+---
+
+---
+
+## 3. List of All Table Call Endpoints (GET)
+
+You can call any of these URLs in your browser or code to get data from the corresponding table:
+
+| Table Description | Endpoint URL |
+| :--- | :--- |
+| **Users** | `https://asfancynumber.com/fancy_number/api.php/wp_users` |
+| **Dealers** | `https://asfancynumber.com/fancy_number/api.php/wp_fn_dealers` |
+| **Number Types** | `https://asfancynumber.com/fancy_number/api.php/wp_fn_number_types` |
+| **Number Categories** | `https://asfancynumber.com/fancy_number/api.php/wp_fn_number_categories` |
+| **Main Inventory** | `https://asfancynumber.com/fancy_number/api.php/wp_fn_numbers` |
+| **Upload Batches** | `https://asfancynumber.com/fancy_number/api.php/wp_fn_upload_batches` |
+| **Cart** | `https://asfancynumber.com/fancy_number/api.php/wp_fn_cart` |
+| **Orders** | `https://asfancynumber.com/fancy_number/api.php/wp_fn_orders` |
+| **Order Items** | `https://asfancynumber.com/fancy_number/api.php/wp_fn_order_items` |
+| **Payments** | `https://asfancynumber.com/fancy_number/api.php/wp_fn_payments` |
+| **Sales Log** | `https://asfancynumber.com/fancy_number/api.php/wp_fn_sales_log` |
+| **WhatsApp Log** | `https://asfancynumber.com/fancy_number/api.php/wp_fn_whatsapp_log` |
+| **Number History** | `https://asfancynumber.com/fancy_number/api.php/wp_fn_number_history` |
+| **Number Patterns** | `https://asfancynumber.com/fancy_number/api.php/wp_fn_number_patterns` |
+| **Featured Numbers** | `https://asfancynumber.com/fancy_number/api.php/wp_fn_featured_numbers` |
+| **Dealer Sales** | `https://asfancynumber.com/fancy_number/api.php/wp_fn_dealer_sales` |
+| **Platform Commission** | `https://asfancynumber.com/fancy_number/api.php/wp_fn_platform_commissions` |
+
+---
+
+## 4. Push Data Examples (POST)
+
+To "Push" data into any table, send a **POST** request to the table URL with a JSON body.
+
+### 1. Users (`wp_users`)
+```json
+{
+    "name": "Arun Kumar",
+    "email": "arun@example.com",
+    "phone": "9876543210",
+    "password_hash": "hashed_pass_here",
+    "role": "dealer"
+}
+```
+
+### 2. Dealers (`wp_fn_dealers`)
+```json
+{
+    "user_id": 5,
+    "dealer_name": "Premium Numbers South",
+    "phone": "9876543211",
+    "whatsapp_number": "9876543211",
+    "whatsapp_group": "South Fancy Group"
+}
+```
+
+### 3. Number Types (`wp_fn_number_types`)
+```json
+{
+    "type_name": "VVIP Gold",
+    "description": "Exclusively for business high-fliers",
+    "display_order": 1
+}
+```
+
+### 4. Number Categories (`wp_fn_number_categories`)
+```json
+{
+    "category_name": "Mirror Numbers",
+    "description": "Numbers that read the same backwards"
+}
+```
+
+### 5. Numbers Inventory (`wp_fn_numbers`)
+```json
+{
+    "mobile_number": "9999911111",
+    "type_id": 1,
+    "category_id": 2,
+    "dealer_id": 5,
+    "price": "50000.00",
+    "prefix": "99999",
+    "pattern_type": "AAAAA",
+    "digit_sum": 50,
+    "repeat_count": 5
+}
+```
+
+### 6. Upload Batches (`wp_fn_upload_batches`)
+```json
+{
+    "file_name": "march_stock.csv",
+    "uploaded_by": 1,
+    "total_records": 5000
+}
+```
+
+### 7. Cart (`wp_fn_cart`)
+```json
+{
+    "user_id": 10,
+    "number_id": 505,
+    "expires_at": "2026-03-08 13:30:00"
+}
+```
+
+### 8. Orders (`wp_fn_orders`)
+```json
+{
+    "user_id": 10,
+    "order_number": "ORD-2026-1001",
+    "total_amount": "50000.00",
+    "order_status": "pending",
+    "payment_status": "unpaid"
+}
+```
+
+### 9. Order Items (`wp_fn_order_items`)
+```json
+{
+    "order_id": 1,
+    "number_id": 505,
+    "dealer_id": 5,
+    "price": "50000.00"
+}
+```
+
+### 10. Payments (`wp_fn_payments`)
+```json
+{
+    "order_id": 1,
+    "transaction_id": "TXN_998877",
+    "payment_gateway": "RazorPay",
+    "amount": "50000.00",
+    "payment_status": "success"
+}
+```
+
+### 11. Sales Log (`wp_fn_sales_log`)
+```json
+{
+    "number_id": 505,
+    "dealer_id": 5,
+    "buyer_id": 10,
+    "order_id": 1,
+    "sold_price": "50000.00"
+}
+```
+
+### 12. WhatsApp Log (`wp_fn_whatsapp_log`)
+```json
+{
+    "number_id": 505,
+    "dealer_id": 5,
+    "group_name": "South Fancy Group",
+    "action_type": "posted_to_group"
+}
+```
+
+### 13. Number History (`wp_fn_number_history`)
+```json
+{
+    "number_id": 505,
+    "action": "Price Changed",
+    "performed_by": 1,
+    "description": "Updated price from 40k to 50k"
+}
+```
+
+### 14. Number Patterns (`wp_fn_number_patterns`)
+```json
+{
+    "number_id": 505,
+    "pattern_value": "99999",
+    "pattern_type": "Prefix Match",
+    "pattern_strength": 9
+}
+```
+
+### 15. Featured Numbers (`wp_fn_featured_numbers`)
+```json
+{
+    "number_id": 505,
+    "feature_type": "Homepage Slider",
+    "priority": 10,
+    "start_date": "2026-03-01",
+    "end_date": "2026-03-31"
+}
+```
+
+### 16. Dealer Sales (`wp_fn_dealer_sales`)
+```json
+{
+    "dealer_id": 5,
+    "number_id": 505,
+    "order_id": 1,
+    "commission": "45000.00"
+}
+```
+
+### 17. Platform Commission (`wp_fn_platform_commissions`)
+```json
+{
+    "order_id": 1,
+    "order_item_id": 1,
+    "number_id": 505,
+    "dealer_id": 5,
+    "buyer_id": 10,
+    "sale_price": "50000.00",
+    "platform_commission_amount": "5000.00",
+    "dealer_payout_amount": "45000.00",
+    "payout_status": "pending"
+}
+```
+
+---
+
+## 5. Important Notes
+1.  **JSON Header:** All requests should send the header `Content-Type: application/json`.
+2.  **Primary Keys:** The API automatically detects the primary key name for each table (e.g., `dealer_id` for the dealer table).
+3.  **Timezone:** All timestamps saved via the API will follow **Indian Standard Time (+05:30)** as configured in the database schema.
+4.  **Performance:** For large tables like `wp_fn_numbers` (5 lakh+), always use the `limit` parameter to avoid slow responses (e.g., `?limit=100`).
