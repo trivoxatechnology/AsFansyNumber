@@ -192,7 +192,10 @@ export default function Dashboard() {
                   else if (notesLower.includes('offers updated') || notesLower.includes('new added')) { operationType = 'Offer Update'; opColor = '#3b82f6'; }
                 } else {
                   const otLower = operationType.toLowerCase();
-                  if (otLower.includes('bulk') || otLower.includes('manual')) opColor = '#8b5cf6';
+                  if (otLower.includes('permanent delete')) { operationType = 'Permanent Delete'; opColor = '#ef4444'; }
+                  else if (otLower.includes('push to live') || otLower === 'live') { operationType = 'Push to Live'; opColor = '#10b981'; } // Emerald
+                  else if (otLower.includes('draft')) { operationType = 'Moved to Draft'; opColor = '#d97706'; } // Amber/Orange
+                  else if (otLower.includes('bulk') || otLower.includes('manual')) opColor = '#8b5cf6';
                   else if (otLower.includes('delete')) opColor = '#ef4444';
                   else if (otLower.includes('offer')) opColor = '#3b82f6';
                 }

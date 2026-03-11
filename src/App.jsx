@@ -33,28 +33,22 @@ function SectionGrid({ title, items, isItemInCart, onToggleCart, accentColor }) 
   );
 }
 
-// Auto-categorises numbers using price/pattern rules instead of is_featured flag
+// Simplified categorization using DB values
 function NumberSections({ numbers, isItemInCart, onToggleCart }) {
-  const isLucky = (n) => {
-    const m = String(n.mobile_number);
-    return m.includes('786') || m.includes('108');
-  };
-  const isVIP = (n) => Number(n.repeat_count) >= 4;
-  const isPremium = (n) => parseFloat(n.base_price || 0) > 50000;
-
-  const vip       = numbers.filter(n => isVIP(n));
-  const premium   = numbers.filter(n => isPremium(n) && !isVIP(n));
-  const lucky     = numbers.filter(n => isLucky(n) && !isVIP(n) && !isPremium(n));
-  const latest    = numbers.filter(n => !isVIP(n) && !isPremium(n) && !isLucky(n)).slice(0, 12);
-  const rest      = numbers.filter(n => !isVIP(n) && !isPremium(n) && !isLucky(n)).slice(12);
+  const diamond  = numbers.filter(n => (n.category||'').toLowerCase() === 'diamond');
+  const platinum = numbers.filter(n => (n.category||'').toLowerCase() === 'platinum');
+  const gold     = numbers.filter(n => (n.category||'').toLowerCase() === 'gold');
+  const silver   = numbers.filter(n => (n.category||'').toLowerCase() === 'silver');
+  const bronze   = numbers.filter(n => (n.category||'').toLowerCase() === 'bronze');
+  const other    = numbers.filter(n => !['diamond','platinum','gold','silver','bronze'].includes((n.category||'').toLowerCase()));
 
   return (
     <div>
-      <SectionGrid title="⭐ VIP Numbers" items={vip} isItemInCart={isItemInCart} onToggleCart={onToggleCart} accentColor="#f59e0b" />
-      <SectionGrid title="💎 Premium Numbers" items={premium} isItemInCart={isItemInCart} onToggleCart={onToggleCart} accentColor="#8b5cf6" />
-      <SectionGrid title="🍀 Lucky Numbers" items={lucky} isItemInCart={isItemInCart} onToggleCart={onToggleCart} accentColor="#10b981" />
-      <SectionGrid title="🆕 Latest Numbers" items={latest} isItemInCart={isItemInCart} onToggleCart={onToggleCart} accentColor="#3b82f6" />
-      <SectionGrid title="📋 Available Numbers" items={rest} isItemInCart={isItemInCart} onToggleCart={onToggleCart} accentColor="var(--neon-green)" />
+      <SectionGrid title="💎 Diamond Collection" items={diamond} isItemInCart={isItemInCart} onToggleCart={onToggleCart} accentColor="#3b82f6" />
+      <SectionGrid title="💍 Platinum Rank" items={platinum} isItemInCart={isItemInCart} onToggleCart={onToggleCart} accentColor="#8b5cf6" />
+      <SectionGrid title="⭐ Gold Selection" items={gold} isItemInCart={isItemInCart} onToggleCart={onToggleCart} accentColor="#f59e0b" />
+      <SectionGrid title="🥈 Silver Grade" items={silver} isItemInCart={isItemInCart} onToggleCart={onToggleCart} accentColor="#64748b" />
+      <SectionGrid title="🥉 Bronze / Basic" items={[...bronze, ...other]} isItemInCart={isItemInCart} onToggleCart={onToggleCart} accentColor="#b45309" />
     </div>
   );
 }
@@ -114,7 +108,7 @@ function App() {
 
       <main className="container" style={styles.mainLayout}>
         <Sidebar 
-          categories={categories}
+          numbers={numbers}
           filters={filters}
           onFilterChange={updateFilter}
           onReset={resetFilters}

@@ -12,7 +12,8 @@ export function useFancyNumbers() {
   // Filters State
   const [filters, setFilters] = useState({
     query: '',
-    categoryId: '',
+    category: '',
+    pattern_type: '',
     digitSum: '',
     maxPrice: 500000,
     sortOrder: 'default'
@@ -20,6 +21,8 @@ export function useFancyNumbers() {
 
   useEffect(() => {
     let isMounted = true;
+    const ctrl = new AbortController();
+    const opts = { signal: ctrl.signal };
     async function fetchData(background = false) {
       if (!background) setLoading(true);
       else setIsRefreshing(true);
@@ -27,8 +30,8 @@ export function useFancyNumbers() {
       
       try {
         const [numRes, catRes] = await Promise.all([
-          fetch(`${API_BASE}/wp_fn_numbers?limit=10000`), // Increased from 100 to sync all
-          fetch(`${API_BASE}/wp_fn_number_categories`)
+          fetch(`${API_BASE}/wp_fn_numbers?limit=10000`, opts),
+          fetch(`${API_BASE}/wp_fn_number_categories`, opts)
         ]);
 
         if (!numRes.ok || !catRes.ok) {
@@ -38,9 +41,9 @@ export function useFancyNumbers() {
         let numsData = await numRes.json();
         const catsData = await catRes.json();
 
-        // Automatically expire old offers
+        // Automatically expire old offers, and filter out draft/hidden numbers
         const now = new Date();
-        numsData = numsData.map(n => {
+        numsData = numsData.filter(n => n.visibility_status !== '0' && n.visibility_status !== 0).map(n => {
           if (n.offer_end_date && new Date(n.offer_end_date) < now) {
             return { ...n, offer_price: null, discount_percentage: null };
           }
@@ -52,8 +55,10 @@ export function useFancyNumbers() {
           setCategories(catsData);
         }
       } catch (err) {
-        console.error(err);
-        if (!background && isMounted) setError('Failed to load VIP numbers. Please try again later.');
+        if (err?.name !== 'AbortError') {
+          console.error(err);
+          if (!background && isMounted) setError('Failed to load VIP numbers. Please try again later.');
+        }
       } finally {
         if (isMounted) {
           setLoading(false);
@@ -72,6 +77,7 @@ export function useFancyNumbers() {
     return () => {
       isMounted = false;
       clearInterval(interval);
+      ctrl.abort();
     };
   }, []);
 
@@ -95,13 +101,43 @@ export function useFancyNumbers() {
             return str === str.split('').reverse().join('');
           });
         } else if (patternType === 'REPEATING') {
-          // E.g. 5 consequence digits
-          result = result.filter(n => Number(n.repeat_count) >= 4);
-        } else if (patternType === 'SEQUENTIAL') {
+          // Use enhanced pattern detection
           result = result.filter(n => {
-            const str = String(n.mobile_number);
-            // Very simple sequential check like 12345
-            return str.includes('12345') || str.includes('54321') || str.includes('67890') || str.includes('09876');
+            const m = String(n.mobile_number).replace(/\D/g,'');
+            let maxRun=1,run=1;
+            for(let i=1;i<m.length;i++){if(m[i]===m[i-1])run++;else run=1;maxRun=Math.max(maxRun,run);}
+            return maxRun >= 4;
+          });
+        } else if (patternType === 'SEQUENTIAL') {
+          // Enhanced sequential detection
+          result = result.filter(n => {
+            const m = String(n.mobile_number).replace(/\D/g,'');
+            if (m.length !== 10) return false;
+            
+            let asc=true,dsc=true;
+            for(let i=1;i<m.length;i++){
+              const current = parseInt(m[i]);
+              const prev = parseInt(m[i-1]);
+              if(current !== prev + 1) asc=false;
+              if(current !== prev - 1) dsc=false;
+            }
+            // Special case: 1234567890
+            if(m === '1234567890'){ asc=true; dsc=false; }
+            
+            return asc || dsc;
+          });
+        } else if (patternType === 'ABAB') {
+          // ABAB pattern detection
+          result = result.filter(n => {
+            const m = String(n.mobile_number).replace(/\D/g,'');
+            if (m.length !== 10) return false;
+            
+            const half=m.slice(0,5);
+            let abab=true;
+            for(let i=0;i<10;i++){
+              if(m[i]!==half[i%5]){abab=false;break;}
+            }
+            return abab;
           });
         }
       } else if (q.includes('*')) {
@@ -115,8 +151,12 @@ export function useFancyNumbers() {
       }
     }
 
-    if (filters.categoryId) {
-      result = result.filter(n => String(n.number_category) === String(filters.categoryId));
+    if (filters.category) {
+      result = result.filter(n => String(n.category) === String(filters.category));
+    }
+
+    if (filters.pattern_type) {
+      result = result.filter(n => String(n.pattern_type) === String(filters.pattern_type));
     }
 
     if (filters.digitSum) {
@@ -160,7 +200,8 @@ export function useFancyNumbers() {
   const resetFilters = () => {
     setFilters({
       query: '',
-      categoryId: '',
+      category: '',
+      pattern_type: '',
       digitSum: '',
       maxPrice: 500000,
       sortOrder: 'default'

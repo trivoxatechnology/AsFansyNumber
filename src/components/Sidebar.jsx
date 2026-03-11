@@ -8,24 +8,42 @@ const formatPrice = (price) => {
   }).format(price);
 };
 
-export default function Sidebar({ categories, filters, onFilterChange, onReset }) {
+export default function Sidebar({ numbers, filters, onFilterChange, onReset }) {
+  const CATEGORIES = ['Diamond', 'Platinum', 'Gold', 'Silver', 'Bronze'];
+  
+  const uniquePatterns = useMemo(() => {
+    return [...new Set(numbers.map(n => n.pattern_type).filter(Boolean))].sort();
+  }, [numbers]);
+
   return (
     <aside style={styles.sidebar}>
       <div style={styles.filterBox}>
         <h3 style={styles.title}>Filters</h3>
         
         <div style={styles.group}>
-          <label style={styles.label}>Category</label>
+          <label style={styles.label}>Category / Rank</label>
           <select 
             style={styles.input} 
-            value={filters.categoryId}
-            onChange={(e) => onFilterChange('categoryId', e.target.value)}
+            value={filters.category}
+            onChange={(e) => onFilterChange('category', e.target.value)}
           >
-            <option value="">All Categories</option>
-            {categories.map(cat => (
-              <option key={cat.id || cat.category_id} value={cat.category_id || cat.id}>
-                {cat.category_name}
-              </option>
+            <option value="">All Ranks</option>
+            {CATEGORIES.map(cat => (
+              <option key={cat} value={cat}>{cat}</option>
+            ))}
+          </select>
+        </div>
+
+        <div style={styles.group}>
+          <label style={styles.label}>Pattern Type</label>
+          <select 
+            style={styles.input} 
+            value={filters.pattern_type}
+            onChange={(e) => onFilterChange('pattern_type', e.target.value)}
+          >
+            <option value="">All Patterns</option>
+            {uniquePatterns.map(p => (
+              <option key={p} value={p}>{p}</option>
             ))}
           </select>
         </div>

@@ -46,6 +46,7 @@ export default function Hero({ onSearch }) {
             <button onClick={() => onSearch('PATTERN:MIRROR')} style={styles.chip}>Mirror Numbers</button>
             <button onClick={() => onSearch('PATTERN:REPEATING')} style={styles.chip}>Repeating Numbers</button>
             <button onClick={() => onSearch('PATTERN:SEQUENTIAL')} style={styles.chip}>Sequential Numbers</button>
+            <button onClick={() => onSearch('PATTERN:ABAB')} style={styles.chip}>ABAB Pattern</button>
           </div>
         </div>
       </div>
