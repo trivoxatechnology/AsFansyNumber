@@ -245,14 +245,23 @@ export default function Dashboard() {
                             <div style={{display:'flex', gap:'20px', flexWrap:'wrap'}}>
                               {String(parsedNotes || u.notes || '').split(',').filter(Boolean).map((note, idx) => {
                                 const splitPoint = note.indexOf(':');
-                                if (splitPoint === -1) return null;
+                                if (splitPoint === -1) {
+                                  // Plain text note without colon
+                                  return (
+                                    <div key={idx} style={{background: '#f1f5f9', padding: '8px 16px', borderRadius: '20px', fontSize: '0.85rem'}}>
+                                      <span style={{color: '#64748b', fontWeight: 600}}>{note.trim()}</span>
+                                    </div>
+                                  );
+                                }
+                                
                                 const label = note.substring(0, splitPoint).trim();
                                 const val = note.substring(splitPoint + 1).trim();
                                 if (!label || label === 'Operator') return null;
                                 let color = '#64748b';
-                                if (label.includes('Insert') || label.includes('New Added')) color = '#16a34a';
+                                if (label.includes('Insert') || label.includes('New Added') || label.includes('Published')) color = '#10b981'; // Emerald
                                 if (label.includes('Update')) color = '#3b82f6';
                                 if (label.includes('Delete')) color = '#ef4444';
+                                if (label.includes('Hidden') || label.includes('Draft')) color = '#d97706';
 
                                 return (
                                   <div key={idx} style={{background: '#f1f5f9', padding: '8px 16px', borderRadius: '20px', fontSize: '0.85rem'}}>
