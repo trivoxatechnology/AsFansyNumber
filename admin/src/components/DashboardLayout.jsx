@@ -1,22 +1,25 @@
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, FileSpreadsheet, Users, Settings, LogOut, Database, Gift, Upload, Tag, Trash2 } from 'lucide-react';
+import { LayoutDashboard, FileSpreadsheet, LogOut, Database, Tag, Trash2, FileText } from 'lucide-react';
+import BackgroundImportWidget from './BackgroundImportWidget';
+import { logout } from '../utils/authService';
 
 export default function DashboardLayout() {
   const navigate = useNavigate();
   const location = useLocation();
+  const adminUsername = localStorage.getItem('adminUsername') || 'Admin';
 
   const handleLogout = () => {
-    localStorage.removeItem('adminToken');
+    logout();
     navigate('/login');
   };
 
   const navItems = [
     { path: '/dashboard',          icon: <LayoutDashboard size={20} />, label: 'Overview' },
     { path: '/import-workspace',   icon: <FileSpreadsheet size={20} />, label: 'Import Workspace' },
-    { path: '/offer-upload',       icon: <Tag size={20} />,             label: 'Offer Upload' },
+    { path: '/offer-upload',       icon: <Tag size={20} />,             label: 'Offer Management' },
     { path: '/inventory',          icon: <Database size={20} />,        label: 'Inventory Manager' },
-    { path: '/discounts',          icon: <Gift size={20} />,            label: 'Discount Manager' },
     { path: '/delete-excel',       icon: <Trash2 size={20} />,          label: 'Delete Numbers' },
+    { path: '/draft-management',   icon: <FileText size={20} />,         label: 'Draft Management' },
   ];
 
   return (
@@ -59,9 +62,12 @@ export default function DashboardLayout() {
               {navItems.find(i => location.pathname.includes(i.path))?.label || 'Dashboard'}
             </h1>
           </div>
-          <div style={styles.adminProfile}>
-            <div style={styles.avatar}>A</div>
-            <span style={{fontWeight: 600}}>System Admin</span>
+          <div style={{display: 'flex', alignItems: 'center'}}>
+            <BackgroundImportWidget />
+            <div style={styles.adminProfile}>
+              <div style={styles.avatar}>A</div>
+              <span style={{fontWeight: 600}}>{adminUsername}</span>
+            </div>
           </div>
         </header>
 

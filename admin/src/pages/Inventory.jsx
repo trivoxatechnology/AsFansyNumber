@@ -1,5 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Search, Edit2, Check, X, Filter, RefreshCw } from 'lucide-react';
+import { Search, Edit2, Check, X, RefreshCw } from 'lucide-react';
+import { fetchWithAuth } from '../utils/api';
+import { writeOperationLog } from '../utils/operationLog';
+import { API_BASE } from '../config/api';
+import { CATEGORIES, PATTERN_TYPES, identifyCouples } from '../utils/PatternEngine';
 
 export default function Inventory() {
   const [inventory, setInventory] = useState([]);
@@ -13,26 +17,33 @@ export default function Inventory() {
   const [bulkModal, setBulkModal] = useState(null);
   const [bulkValue, setBulkValue] = useState('');
   const [bulkUser, setBulkUser] = useState(localStorage.getItem('adminUsername') || '');
-  const [bulkProcessing, setBulkProcessing] = useState(false);
-  const [bulkProgress, setBulkProgress] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [patternFilter, setPatternFilter] = useState('');
+  const [showCouplesOnly, setShowCouplesOnly] = useState(false);
+  const [showBusinessOnly, setShowBusinessOnly] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState(''); // shows live toast during bulk ops
 
   useEffect(() => {
+    const ctrl = new AbortController();
     async function fetchInventory() {
       setLoading(true);
       try {
-        const res = await fetch('https://asfancynumber.com/fancy_number/api.php/wp_fn_numbers?limit=600000');
-        if (res.ok) {
+        const res = await fetchWithAuth(`${API_BASE}/wp_fn_numbers?limit=600000`, { signal: ctrl.signal });
+        if (res && res.ok) {
           const data = await res.json();
           setInventory(Array.isArray(data) ? data : []);
         }
       } catch (err) {
-        console.error('Failed to fetch inventory', err);
-        setInventory([]);
+        if (err?.name !== 'AbortError') {
+          console.error('Failed to fetch inventory', err);
+          setInventory([]);
+        }
       } finally {
         setLoading(false);
       }
     }
     fetchInventory();
+    return () => ctrl.abort();
   }, []);
 
   const handleEditClick = (item) => {
@@ -52,15 +63,26 @@ export default function Inventory() {
 
   const handleSave = async () => {
     // Strip internal React fields before sending to API
-    const { _rowId, _status, _errors, _isDbDupe, _operation, pattern_value, auto_category, ...cleanForm } = editForm;
+    const { _rowId, _status, _errors, _isDbDupe, _operation, pattern_value: _pattern_value, auto_category: _auto_category, category_name: _cn, pattern_name: _pn, vip_score: _vs, subcategory: _sc, auto_detected: _ad, number_type: _nt, ...cleanForm } = editForm;
     try {
-      const res = await fetch(`https://asfancynumber.com/fancy_number/api.php/wp_fn_numbers/${editingId}`, {
+      const res = await fetchWithAuth(`${API_BASE}/wp_fn_numbers/${editingId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(cleanForm)
       });
-      if (res.ok) {
+      if (res && res.ok) {
         setInventory(prev => prev.map(item => item.number_id === editingId ? { ...item, ...cleanForm } : item));
+        const finalUser = localStorage.getItem('adminUsername') || 'Admin';
+        await writeOperationLog({
+          fileName: 'Inventory Edit',
+          operationType: 'Single Update',
+          operationData: `Inventory row updated: ${editingId}`,
+          totalRecords: 1,
+          tableName: 'wp_fn_numbers',
+          recordId: editingId,
+          recordIds: [editingId],
+          adminName: finalUser,
+          uploadedBy: finalUser,
+        });
       } else {
         alert("Failed to update database.");
       }
@@ -74,11 +96,23 @@ export default function Inventory() {
   const handleDelete = async (id) => {
     if (!window.confirm("Are you sure you want to permanently delete this number?")) return;
     try {
-      const res = await fetch(`https://asfancynumber.com/fancy_number/api.php/wp_fn_numbers/${id}`, {
+      const res = await fetchWithAuth(`${API_BASE}/wp_fn_numbers/${id}`, {
         method: 'DELETE'
       });
-      if (res.ok) {
+      if (res && res.ok) {
         setInventory(prev => prev.filter(item => item.number_id !== id));
+        const finalUser = localStorage.getItem('adminUsername') || 'Admin';
+        await writeOperationLog({
+          fileName: 'Inventory Delete',
+          operationType: 'Single Delete',
+          operationData: `Inventory row deleted: ${id}`,
+          totalRecords: 1,
+          tableName: 'wp_fn_numbers',
+          recordId: id,
+          recordIds: [id],
+          adminName: finalUser,
+          uploadedBy: finalUser,
+        });
       } else {
         alert("Failed to delete record.");
       }
@@ -93,8 +127,18 @@ export default function Inventory() {
   const filteredInventory = inventory.filter(item => {
     const matchSearch = String(item.mobile_number||'').includes(searchTerm);
     const matchFile = fileFilter ? item.inventory_source === fileFilter : true;
-    return matchSearch && matchFile;
+    const matchCategory = categoryFilter ? item.category === categoryFilter : true;
+    const matchPattern = patternFilter ? item.pattern_type === patternFilter : true;
+    const matchBusiness = showBusinessOnly ? (item.pattern_type||'').toLowerCase().includes('business') : true;
+    return matchSearch && matchFile && matchCategory && matchPattern && matchBusiness;
   });
+
+  const coupleGroups = showCouplesOnly ? identifyCouples(filteredInventory) : [];
+  const coupleFlatList = showCouplesOnly ? coupleGroups.flat().map(n => n.number_id) : [];
+  
+  const finalDisplay = showCouplesOnly 
+    ? filteredInventory.filter(n => coupleFlatList.includes(n.number_id))
+    : filteredInventory;
 
   const handleSelectAll = (e) => {
     if (e.target.checked) {
@@ -116,86 +160,137 @@ export default function Inventory() {
     setBulkValue('');
   };
 
-  const API = 'https://asfancynumber.com/fancy_number/api.php';
-
   const executeBulkAction = async () => {
     if (!bulkModal) return;
-    setBulkProcessing(true);
+    const actionToRun = bulkModal;
+    const valueToRun = bulkValue;
     const ids = [...selectedIds];
-    let success = 0, failed = 0;
-    const CHUNK = 5;
+    const finalUser = bulkUser.trim() || localStorage.getItem('adminUsername') || 'Unknown Admin';
 
-    if (bulkModal === 'delete_numbers') {
-      for (let i = 0; i < ids.length; i += CHUNK) {
-        const chunk = ids.slice(i, i + CHUNK);
-        setBulkProgress(`Deleting ${i+1}–${Math.min(i+CHUNK, ids.length)} of ${ids.length}…`);
-        const results = await Promise.all(
-          chunk.map(id => fetch(`${API}/wp_fn_numbers/${id}`, {method:'DELETE'}).then(r=>r.ok?1:0).catch(()=>0))
-        );
-        success += results.reduce((s,v)=>s+v,0);
-        failed += results.reduce((s,v)=>s+(1-v),0);
-      }
-      setInventory(prev => prev.filter(item => !ids.includes(item.number_id)));
-    } else {
-      // Build the update payload based on action
-      let payload = {};
-      if (bulkModal === 'update_price') payload = { base_price: bulkValue };
-      else if (bulkModal === 'update_category') payload = { number_category: bulkValue };
-      else if (bulkModal === 'update_status') payload = { number_status: bulkValue };
-      else if (bulkModal === 'hide_numbers') payload = { visibility_status: '0' };
-
-      for (let i = 0; i < ids.length; i += CHUNK) {
-        const chunk = ids.slice(i, i + CHUNK);
-        setBulkProgress(`Updating ${i+1}–${Math.min(i+CHUNK, ids.length)} of ${ids.length}…`);
-        const results = await Promise.all(
-          chunk.map(id => fetch(`${API}/wp_fn_numbers/${id}`, {
-            method:'PUT',
-            headers:{'Content-Type':'application/json'},
-            body: JSON.stringify(payload)
-          }).then(r=>r.ok?1:0).catch(()=>0))
-        );
-        success += results.reduce((s,v)=>s+v,0);
-        failed += results.reduce((s,v)=>s+(1-v),0);
-      }
-      // Update local state
-      setInventory(prev => prev.map(item => ids.includes(item.number_id) ? {...item, ...payload} : item));
-    }
-
-    // Log the bulk action
-    const opName = bulkModal.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-    const finalUser = bulkUser.trim() || 'Unknown';
-    const now = new Date();
-    try {
-      await fetch(`${API}/wp_fn_upload_batches`, {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({
-          file_name: `Bulk Action|||${finalUser}|||${opName}: ${success}`,
-          uploaded_by: finalUser,
-          total_records: ids.length
-        })
-      });
-    } catch {}
-
-    setBulkProcessing(false);
-    setBulkProgress('');
+    // Close modal and clear selection immediately
     setBulkModal(null);
     setSelectedIds([]);
-    alert(`Bulk ${opName} complete!\nSuccess: ${success}  |  Failed: ${failed}\nBy: ${finalUser}  |  At: ${now.toLocaleString()}`);
+
+    let success = 0, failed = 0;
+    const CONCURRENCY = 25;
+    const MAX_RETRIES = 2;
+
+    const opName = actionToRun.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+
+    let payload = {};
+    let isDelete = actionToRun === 'delete_numbers';
+    if (actionToRun === 'update_price') payload = { base_price: valueToRun };
+    else if (actionToRun === 'update_category') payload = { category: valueToRun };
+    else if (actionToRun === 'update_status') payload = { number_status: valueToRun };
+    else if (actionToRun === 'hide_numbers') payload = { visibility_status: '0' };
+
+    const allResults = [];
+    for (let i = 0; i < ids.length; i += CONCURRENCY) {
+      const chunk = ids.slice(i, i + CONCURRENCY);
+      const progressMsg = `${isDelete ? 'Deleting' : 'Updating'} ${Math.min(i + CONCURRENCY, ids.length)} / ${ids.length}...`;
+      setBulkProgress(progressMsg);
+
+      const promises = chunk.map(async (id) => {
+        let retries = 0;
+        while (retries <= MAX_RETRIES) {
+          try {
+            const res = await fetchWithAuth(`${API_BASE}/wp_fn_numbers/${id}`, {
+              method: isDelete ? 'DELETE' : 'PUT',
+              body: isDelete ? undefined : JSON.stringify(payload)
+            });
+            if (res && res.ok) return { ok: true, id };
+            retries++;
+          } catch (err) {
+            retries++;
+            if (retries > MAX_RETRIES) return { ok: false, id };
+          }
+          if (retries <= MAX_RETRIES) await new Promise(r => setTimeout(r, 300 * retries));
+        }
+        return { ok: false, id };
+      });
+
+      const chunkResults = await Promise.all(promises);
+      allResults.push(...chunkResults);
+      await new Promise(r => setTimeout(r, 100));
+    }
+
+    const successfulResults = allResults.filter(r => r.ok);
+    success = successfulResults.length;
+    failed = allResults.length - success;
+    const successfulIds = successfulResults.map(r => r.id);
+
+    // Update local UI state
+    if (isDelete) {
+      setInventory(prev => prev.filter(item => !successfulIds.includes(item.number_id)));
+    } else {
+      setInventory(prev => prev.map(item => {
+        if (successfulIds.includes(item.number_id)) return { ...item, ...payload };
+        return item;
+      }));
+    }
+
+    // For 'hide_numbers': write a Draft batch so DraftManagement picks it up
+    if (actionToRun === 'hide_numbers' && success > 0) {
+      await fetchWithAuth(`${API_BASE}/wp_fn_upload_batches`, {
+        method: 'POST',
+        body: JSON.stringify({
+          file_name: `Inventory Bulk Hide (${new Date().toLocaleDateString('en-IN')})`,
+          operation_type: 'Draft',
+          admin_name: finalUser,
+          uploaded_by: finalUser,
+          total_records: success,
+          records_inserted: 0,
+          records_updated: success,
+          records_failed: failed,
+          status: 'draft',
+          table_name: 'wp_fn_numbers',
+          operation_data: `Hidden from store: ${success} numbers`,
+        })
+      }).catch(err => console.warn('Draft batch write failed:', err));
+    }
+
+    // Operation log
+    await writeOperationLog({
+      fileName: 'Inventory Bulk Action',
+      operationType: opName,
+      operationData: `${opName}: ${success} success, ${failed} failed`,
+      totalRecords: ids.length,
+      tableName: 'wp_fn_numbers',
+      recordIds: successfulIds,
+      adminName: finalUser,
+      uploadedBy: finalUser,
+    });
+
+    setBulkProgress('');
+    // Show brief completion toast
+    setBulkProgress(`✅ Done — ${success} ${isDelete ? 'deleted' : 'updated'}${failed > 0 ? `, ${failed} failed` : ''}`);
+    setTimeout(() => setBulkProgress(''), 4000);
   };
 
-  // Calculate Dashboard KPI using filtered data (no is_featured - auto-ranking instead)
-  const totalNumbers = filteredInventory.length;
-  const availableCount = filteredInventory.filter(n => n.number_status === 'available').length;
-  const soldCount = filteredInventory.filter(n => n.number_status === 'sold').length;
-  const offerCount = filteredInventory.filter(n => n.offer_price && parseFloat(n.offer_price) > 0).length;
-  const premiumCount = filteredInventory.filter(n => parseFloat(n.base_price) > 50000).length;
+  // Calculate Dashboard KPI using filtered data
+  const totalNumbers = finalDisplay.length;
+  const availableCount = finalDisplay.filter(n => n.number_status === 'available').length;
+  const soldCount = finalDisplay.filter(n => n.number_status === 'sold').length;
+  const offerCount = finalDisplay.filter(n => n.offer_price && parseFloat(n.offer_price) > 0).length;
+  const premiumCount = finalDisplay.filter(n => parseFloat(n.base_price) > 50000).length;
 
   return (
     <div>
       <div style={styles.header}>
         <h2 style={styles.title}>Inventory Management</h2>
         <div style={{display:'flex', gap:'16px', alignItems:'center'}}>
+          <button 
+            onClick={()=>setShowCouplesOnly(!showCouplesOnly)}
+            style={{...styles.filterBtn, background: showCouplesOnly ? '#f0f9ff' : 'white', borderColor: showCouplesOnly ? '#0ea5e9' : 'var(--border-color)'}}
+          >
+            {showCouplesOnly ? '👥 Showing Couples' : '👥 Find Couples'}
+          </button>
+          <button 
+            onClick={()=>setShowBusinessOnly(!showBusinessOnly)}
+            style={{...styles.filterBtn, background: showBusinessOnly ? '#fffcf0' : 'white', borderColor: showBusinessOnly ? '#eab308' : 'var(--border-color)'}}
+          >
+            {showBusinessOnly ? '💼 Showing Business' : '💼 Business Numbers'}
+          </button>
           {availableFiles.length > 0 && (
             <select 
               value={fileFilter} 
@@ -206,6 +301,29 @@ export default function Inventory() {
               {availableFiles.map(f => <option key={f} value={f}>{f}</option>)}
             </select>
           )}
+
+          {/* New Pattern V2 Filters */}
+          <select 
+            value={categoryFilter} 
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            style={styles.fileSelect}
+          >
+            <option value="">All Categories</option>
+            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+
+          <select 
+            value={patternFilter} 
+            onChange={(e) => setPatternFilter(e.target.value)}
+            style={styles.fileSelect}
+          >
+            <option value="">All Pattern Types</option>
+            {/* Unique pattern types from the loaded inventory */}
+            {[...new Set(inventory.map(i => i.pattern_type).filter(Boolean))].sort().map(p => (
+              <option key={p} value={p}>{p}</option>
+            ))}
+          </select>
+
           <div style={styles.searchBar}>
             <Search size={20} style={styles.searchIcon} />
             <input 
@@ -269,6 +387,23 @@ export default function Inventory() {
           </div>
         )}
 
+        {/* ── Bulk Progress Toast ── */}
+        {bulkProgress && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '10px',
+            background: bulkProgress.startsWith('✅') ? '#dcfce7' : '#e0f2fe',
+            border: `1px solid ${bulkProgress.startsWith('✅') ? '#86efac' : '#7dd3fc'}`,
+            color: bulkProgress.startsWith('✅') ? '#15803d' : '#0369a1',
+            padding: '10px 16px', borderRadius: '8px', marginBottom: '12px',
+            fontWeight: 700, fontSize: '0.88rem'
+          }}>
+            {!bulkProgress.startsWith('✅') && (
+              <RefreshCw size={15} style={{ animation: 'spin 1s linear infinite', flexShrink: 0 }} />
+            )}
+            {bulkProgress}
+          </div>
+        )}
+
         <div style={styles.tableWrapper}>
           <table style={styles.table}>
             <thead>
@@ -281,10 +416,11 @@ export default function Inventory() {
                   />
                 </th>
                 <th style={styles.th}>Mobile Number</th>
+                <th style={styles.th}>Pattern Type</th>
+                <th style={styles.th}>Category / Type</th>
                 <th style={styles.th}>Source File</th>
                 <th style={styles.th}>Base Price (₹)</th>
                 <th style={styles.th}>Offer Price (₹)</th>
-                <th style={styles.th}>Category ID</th>
                 <th style={styles.th}>Incharge</th>
                 <th style={styles.th}>WhatsApp Group</th>
                 <th style={styles.th}>Status</th>
@@ -323,6 +459,30 @@ export default function Inventory() {
                       )}
                     </td>
 
+                    <td style={styles.td}>
+                      {isEditing ? (
+                        <>
+                          <input type="text" list="inv-patterns" name="pattern_type" value={editForm.pattern_type || ''} onChange={handleChange} style={styles.editInput} placeholder="Select/Type Pattern" />
+                          <datalist id="inv-patterns">
+                            {PATTERN_TYPES.map(p => <option key={p} value={p} />)}
+                          </datalist>
+                        </>
+                      ) : (
+                        item.pattern_type || '-'
+                      )}
+                    </td>
+
+                    <td style={styles.td}>
+                      {isEditing ? (
+                        <select name="category" value={editForm.category || ''} onChange={handleChange} style={styles.editInput}>
+                          <option value="">-- Rank --</option>
+                          {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      ) : (
+                        <span style={{padding:'2px 8px', borderRadius:'6px', fontSize:'0.75rem', fontWeight:'bold', background:(item.category||'Bronze')==='Bronze'?'#f1f5f9':'#fef08a', color:(item.category||'Bronze')==='Bronze'?'#64748b':'#854d0e'}}>{item.category || 'Bronze'}</span>
+                      )}
+                    </td>
+
                     <td style={{...styles.td, fontSize:'0.8rem', color:'var(--text-muted)'}}>{item.inventory_source || '—'}</td>
                     
                     <td style={styles.td}>
@@ -338,14 +498,6 @@ export default function Inventory() {
                         <input type="number" name="offer_price" value={editForm.offer_price || ''} onChange={handleChange} style={styles.editInput} />
                       ) : (
                         item.offer_price || '-'
-                      )}
-                    </td>
-
-                    <td style={styles.td}>
-                      {isEditing ? (
-                        <input type="number" name="number_category" value={editForm.number_category} onChange={handleChange} style={{...styles.editInput, width: '60px'}} />
-                      ) : (
-                        item.number_category || '-'
                       )}
                     </td>
 
@@ -383,8 +535,8 @@ export default function Inventory() {
                       {isEditing ? (
                         <div style={styles.actionBtns}>
                           <button onClick={handleSave} style={styles.saveBtn} title="Save Changes"><Check size={16} /></button>
-                          <button onClick={() => alert("WhatsApp Share Hook Triggered")} style={styles.waShareBtn} title="Share to Group">W/A Share</button>
-                          <button onClick={() => alert("WhatsApp Remove Hook Triggered")} style={styles.waRemoveBtn} title="Remove from Group">W/A Remove</button>
+                          <button onClick={() => alert("WhatsApp integration coming soon")} style={styles.waShareBtn} title="Share to Group (coming soon)">W/A Share</button>
+                          <button onClick={() => alert("WhatsApp integration coming soon")} style={styles.waRemoveBtn} title="Remove from Group (coming soon)">W/A Remove</button>
                           <button onClick={handleCancel} style={styles.cancelBtn} title="Cancel"><X size={16} /></button>
                         </div>
                       ) : (
@@ -438,7 +590,7 @@ export default function Inventory() {
             {bulkModal !== 'delete_numbers' && bulkModal !== 'hide_numbers' && (
               <div style={{marginBottom:'16px'}}>
                 <label style={{display:'block',fontSize:'0.85rem',fontWeight:600,color:'var(--text-muted)',marginBottom:'6px'}}>
-                  {bulkModal === 'update_price' ? 'New Base Price (₹)' : bulkModal === 'update_category' ? 'New Category' : 'New Status'}
+                  {bulkModal === 'update_price' ? 'New Base Price (₹)' : bulkModal === 'update_category' ? 'New Category / Type' : 'New Status'}
                 </label>
                 {bulkModal === 'update_status' ? (
                   <select value={bulkValue} onChange={e => setBulkValue(e.target.value)} style={{padding:'10px 14px',borderRadius:'8px',border:'1px solid var(--border-color)',width:'100%',outline:'none'}}>
@@ -452,7 +604,7 @@ export default function Inventory() {
                     type={bulkModal === 'update_price' ? 'number' : 'text'}
                     value={bulkValue} 
                     onChange={e => setBulkValue(e.target.value)}
-                    placeholder={bulkModal === 'update_price' ? 'e.g. 5000' : 'e.g. Premium'}
+                    placeholder={bulkModal === 'update_price' ? 'e.g. 5000' : 'e.g. Diamond'}
                     style={{padding:'10px 14px',borderRadius:'8px',border:'1px solid var(--border-color)',width:'100%',outline:'none'}}
                   />
                 )}
@@ -470,24 +622,16 @@ export default function Inventory() {
               />
             </div>
 
-            {bulkProcessing && (
-              <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'16px',color:'#3b82f6',fontWeight:600,fontSize:'0.9rem'}}>
-                <RefreshCw size={18} style={{animation:'spin 1s linear infinite'}}/> {bulkProgress}
-              </div>
-            )}
-
-            <div style={{display:'flex',gap:'12px',justifyContent:'flex-end'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <button onClick={() => setBulkModal(null)} style={{padding:'10px 16px',background:'transparent',border:'1px solid var(--border-color)',borderRadius:'8px',fontWeight:600,color:'var(--text-muted)',cursor:'pointer'}}>
+                Cancel
+              </button>
               <button 
-                onClick={() => { setBulkModal(null); setBulkProgress(''); }} 
-                disabled={bulkProcessing}
-                style={{padding:'10px 18px',background:'#f1f5f9',border:'1px solid var(--border-color)',borderRadius:'8px',cursor:'pointer',fontWeight:600,color:'var(--text-muted)'}}
-              >Cancel</button>
-              <button 
-                onClick={executeBulkAction} 
-                disabled={bulkProcessing || (bulkModal !== 'delete_numbers' && bulkModal !== 'hide_numbers' && !bulkValue)}
-                style={{padding:'10px 18px',background: bulkModal === 'delete_numbers' ? '#ef4444' : 'var(--neon-green-dark)',color:'#fff',border:'none',borderRadius:'8px',cursor:'pointer',fontWeight:700,display:'flex',alignItems:'center',gap:'6px'}}
+                onClick={executeBulkAction}
+                disabled={bulkModal !== 'delete_numbers' && bulkModal !== 'hide_numbers' && !bulkValue}
+                style={{padding:'10px 20px',background: bulkModal === 'delete_numbers' ? '#ef4444' : '#3b82f6',border:'none',color:'#fff',borderRadius:'8px',fontWeight:700,cursor:'pointer'}}
               >
-                {bulkProcessing ? 'Processing...' : bulkModal === 'delete_numbers' ? 'Confirm Delete' : 'Apply Changes'}
+                {bulkModal === 'delete_numbers' ? '🗑 Confirm Delete' : bulkModal === 'hide_numbers' ? '📦 Move to Drafts' : '✅ Apply Changes'}
               </button>
             </div>
           </div>
@@ -576,6 +720,11 @@ const styles = {
   editBtn: {
     background: 'transparent', border: '1px solid var(--border-color)', padding: '6px 12px',
     borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600
+  },
+  filterBtn: {
+    padding: '8px 16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', 
+    cursor: 'pointer', fontWeight: 700, fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '8px',
+    transition: 'all 0.2s'
   },
   actionBtns: {
     display: 'flex', gap: '8px', flexWrap: 'wrap'

@@ -1,23 +1,25 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { ImportProvider } from './context/ImportContext';
+import { validateSession } from './utils/authService';
 import Login from './pages/Login';
 import DashboardLayout from './components/DashboardLayout';
 import Dashboard from './pages/Dashboard';
 import ImportWorkspace from './pages/ImportWorkspace';
 import OfferUpload from './pages/OfferUpload';
 import Inventory from './pages/Inventory';
-import Discounts from './pages/Discounts';
 import DeleteExcel from './pages/DeleteExcel';
+import DraftManagement from './pages/DraftManagement';
 
-// Protected Route Wrapper
+// Protected Route Wrapper — validates token format AND session expiry
 const ProtectedRoute = ({ children }) => {
-  const token = localStorage.getItem('adminToken');
-  if (!token) return <Navigate to="/login" replace />;
+  if (!validateSession()) return <Navigate to="/login" replace />;
   return children;
 };
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <ImportProvider>
+      <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
         
@@ -28,10 +30,11 @@ export default function App() {
           <Route path="import-workspace" element={<ImportWorkspace />} />
           <Route path="offer-upload" element={<OfferUpload />} />
           <Route path="inventory" element={<Inventory />} />
-          <Route path="discounts" element={<Discounts />} />
           <Route path="delete-excel" element={<DeleteExcel />} />
+          <Route path="draft-management" element={<DraftManagement />} />
         </Route>
       </Routes>
-    </BrowserRouter>
+      </BrowserRouter>
+    </ImportProvider>
   );
 }

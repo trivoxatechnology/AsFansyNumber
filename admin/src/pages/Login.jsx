@@ -1,22 +1,32 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Lock, User } from 'lucide-react';
+import { Lock, User, Loader2 } from 'lucide-react';
+import { login } from '../utils/authService';
 
 export default function Login() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [error,    setError]    = useState('');
+  const [loading,  setLoading]  = useState(false);
   const navigate = useNavigate();
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
-    // Simulate API Login Check
-    if (username === 'admin' && password === 'admin123') {
-      localStorage.setItem('adminToken', 'mock-secure-token');
-      localStorage.setItem('adminUsername', username);
-      navigate('/dashboard');
-    } else {
-      setError('Invalid credentials');
+    setError('');
+    setLoading(true);
+
+    try {
+      const result = await login(username, password);
+      if (result.success) {
+        navigate('/dashboard');
+      } else {
+        setError(result.error || 'Login failed. Please try again.');
+      }
+    } catch (err) {
+      setError('An unexpected error occurred. Please try again.');
+      console.error('Login error:', err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -34,31 +44,41 @@ export default function Login() {
         <form onSubmit={handleLogin} style={styles.form}>
           <div style={styles.inputGroup}>
             <User size={18} style={styles.icon} />
-            <input 
-              type="text" 
-              placeholder="Username" 
-              style={styles.input} 
+            <input
+              type="text"
+              placeholder="Username"
+              style={styles.input}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
+              autoComplete="username"
+              disabled={loading}
             />
           </div>
 
           <div style={styles.inputGroup}>
             <Lock size={18} style={styles.icon} />
-            <input 
-              type="password" 
-              placeholder="Password" 
+            <input
+              type="password"
+              placeholder="Password"
               style={styles.input}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
+              autoComplete="current-password"
+              disabled={loading}
             />
           </div>
 
-          <button type="submit" style={styles.button}>Secure Login</button>
+          <button type="submit" style={{...styles.button, opacity: loading ? 0.7 : 1}} disabled={loading}>
+            {loading
+              ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite', marginRight: 8 }} /> Verifying...</>
+              : 'Secure Login'
+            }
+          </button>
         </form>
       </div>
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
@@ -105,7 +125,7 @@ const styles = {
   error: {
     background: '#fee2e2',
     color: '#ef4444',
-    padding: '10px',
+    padding: '10px 14px',
     borderRadius: 'var(--radius-md)',
     marginBottom: '20px',
     fontSize: '0.9rem',
@@ -149,5 +169,9 @@ const styles = {
     cursor: 'pointer',
     marginTop: '10px',
     transition: 'opacity 0.2s',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '6px',
   }
 };
