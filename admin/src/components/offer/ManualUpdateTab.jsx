@@ -74,10 +74,7 @@ export default function ManualUpdateTab() {
           operationData: 'Offers Updated: 1',
           totalRecords: 1,
           tableName: 'wp_fn_numbers',
-          recordId: id,
-          recordIds: [id],
           adminName: finalUser,
-          uploadedBy: finalUser,
         });
       }
     } catch(err) {
@@ -119,9 +116,7 @@ export default function ManualUpdateTab() {
       operationData: `Offers Updated: ${success}`,
       totalRecords: selectedIds.length,
       tableName: 'wp_fn_numbers',
-      recordIds: selectedIds,
       adminName: finalUser,
-      uploadedBy: finalUser,
     });
 
     setSelectedIds([]);

@@ -2,7 +2,6 @@ import { useState, useCallback, useRef } from 'react';
 import { useDropzone } from 'react-dropzone';
 import * as XLSX from 'xlsx';
 import { CloudUpload, Download, RefreshCw, Check, CircleCheck } from 'lucide-react';
-import { writeOperationLog } from '../../utils/operationLog';
 import { API_BASE } from '../../config/api';
 import { classifyNumber } from '../../utils/PatternEngine';
 import { useImport } from '../../context/ImportContext';
@@ -34,13 +33,11 @@ export default function ExcelUploadTab() {
   const [rows, setRows] = useState([]);
   const [step, setStep] = useState(1);
   const [isParsing, setIsParsing] = useState(false);
-  const [isApplying, setIsApplying] = useState(false);
   const [operatorName, setOperatorName] = useState(localStorage.getItem('adminUsername') || '');
   const [done, setDone] = useState(false);
   const [summary, setSummary] = useState(null);
   const [parseProgress, setParseProgress] = useState('');
-  const [importProgressState, setImportProgressState] = useState('');
-  const { startImport, updateProgress, finishImport, isAbortRequested, getAbortType } = useImport();
+  const { runImport } = useImport();
   
   const fileRef = useRef('');
 
@@ -99,10 +96,13 @@ export default function ExcelUploadTab() {
             if (Object.prototype.hasOwnProperty.call(existingMap, m)) {
                v._isNew = false;
                v._numId = existingMap[m].id;
+               v._dbId = existingMap[m].id;
+               v._operation = 'update';
                v._oldPrice = parseFloat(existingMap[m].price || 0);
                v._diff = parseFloat(v.offer_price || 0) - v._oldPrice;
             } else {
                v._isNew = true;
+               v._operation = 'insert';
                v._oldPrice = 0;
                v._diff = parseFloat(v.offer_price || 0);
             }
@@ -130,118 +130,56 @@ export default function ExcelUploadTab() {
     XLSX.writeFile(wb,'Offer_Update_Template.xlsx');
   };
 
-  const executeQueue = async (mode) => {
+  const executeQueue = (mode) => {
     let targetRows = [];
     if (mode === 'all') targetRows = rows.filter(r=>r._status==='valid');
     if (mode === 'existing') targetRows = rows.filter(r=>r._status==='valid' && !r._isNew);
     if (mode === 'new') targetRows = rows.filter(r=>r._status==='valid' && r._isNew);
 
-    // Reset to step 1 immediately so user can navigate away
+    const srcFile = fileRef.current || 'Offer Upload';
+
+    // Build cleanRow for the background import engine
+    const cleanRow = (r) => {
+      if (r._isNew) {
+        // Insert path — build full payload
+        const pattern = classifyNumber(r.mobile_number);
+        const payload = {
+          mobile_number: r.mobile_number,
+          base_price: r.offer_price,
+          offer_price: r.offer_price,
+          number_status: 'available',
+          visibility_status: '1',
+          category: pattern.category,
+          pattern_type: pattern.pattern_type,
+          inventory_source: srcFile,
+        };
+        if (r.offer_start_date) payload.offer_start_date = r.offer_start_date;
+        if (r.offer_end_date) payload.offer_end_date = r.offer_end_date;
+        if (r.is_featured) payload.is_featured = r.is_featured;
+        return payload;
+      } else {
+        // Update path — only send changed offer fields
+        const payload = { offer_price: r.offer_price };
+        if (r.offer_start_date) payload.offer_start_date = r.offer_start_date;
+        if (r.offer_end_date) payload.offer_end_date = r.offer_end_date;
+        if (r.is_featured) payload.is_featured = r.is_featured;
+        return payload;
+      }
+    };
+
+    // Hand off to background import engine (survives page navigation)
+    runImport({
+      rows: targetRows,
+      fileName: srcFile,
+      importDestination: 'store',
+      operatorName: operatorName.trim() || localStorage.getItem('adminUsername') || 'Admin',
+      cleanRow,
+    });
+
+    // Reset UI immediately — import continues in background via ImportContext
     setStep(1);
     setRows([]);
     setDone(false);
-
-    startImport(targetRows.length);
-
-    let updated = 0, added = 0, failed = 0;
-    const touchedRecordIds = [];
-    const CONCURRENCY = 25;
-    for (let i = 0; i < targetRows.length; i += CONCURRENCY) {
-      if (isAbortRequested()) break;
-
-      const chunk = targetRows.slice(i, i + CONCURRENCY);
-      const progressMsg = `Applying ${i+1}–${Math.min(i+CONCURRENCY, targetRows.length)} of ${targetRows.length}…`;
-      setImportProgressState(progressMsg);
-      updateProgress(progressMsg, i);
-      
-      const promises = chunk.map(async row => {
-        try {
-          if (!row._isNew) {
-            const payload = { offer_price: row.offer_price };
-            if (row.offer_start_date) payload.offer_start_date = row.offer_start_date;
-            if (row.offer_end_date) payload.offer_end_date = row.offer_end_date;
-            if (row.is_featured) payload.is_featured = row.is_featured;
-            
-            const res = await fetch(`${API_BASE}/wp_fn_numbers/${row._numId}`, {
-              method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
-            });
-            if (res.ok) return { kind: 'updated', recordId: row._numId };
-            return { kind: 'failed' };
-          } else {
-            const pattern = classifyNumber(row.mobile_number);
-            const payload = { 
-              mobile_number: row.mobile_number,
-              base_price: row.offer_price,
-              offer_price: row.offer_price,
-              number_status: 'available',
-              category: pattern.category,
-              pattern_type: pattern.pattern_type,
-              inventory_source: fileRef.current || 'Offer Upload'
-            };
-            if (row.offer_start_date) payload.offer_start_date = row.offer_start_date;
-            if (row.offer_end_date) payload.offer_end_date = row.offer_end_date;
-            if (row.is_featured) payload.is_featured = row.is_featured;
-
-            const res = await fetch(`${API_BASE}/wp_fn_numbers`, {
-              method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
-            });
-            if (!res.ok) return { kind: 'failed' };
-            const body = await res.json().catch(() => null);
-            const insertedId = body?.id ?? body?.insert_id ?? null;
-            return { kind: 'added', recordId: insertedId, fallbackRef: row.mobile_number };
-          }
-        } catch {
-          return { kind: 'failed' };
-        }
-      });
-
-      const results = await Promise.all(promises);
-      results.forEach((result) => {
-         if (result.kind === 'updated') {
-           updated++;
-           if (result.recordId) touchedRecordIds.push(result.recordId);
-         } else if (result.kind === 'added') {
-           added++;
-           if (result.recordId) touchedRecordIds.push(result.recordId);
-           else if (result.fallbackRef) touchedRecordIds.push(`mobile:${result.fallbackRef}`);
-         } else {
-           failed++;
-         }
-      });
-    }
-
-    if (isAbortRequested() && getAbortType() === 'delete') {
-      // Just bail out, BackgroundImportWidget handles API cleanup and UI reset
-      return;
-    }
-
-    setImportProgressState('Saving upload log…');
-    const finalOperator = operatorName.trim() || localStorage.getItem('adminUsername') || 'Admin';
-    await writeOperationLog({
-      fileName: fileRef.current || 'Offer Update',
-      operationType: 'Excel Offer Update',
-      operationData: `Offers Updated: ${updated}, New Added: ${added}`,
-      totalRecords: targetRows.length,
-      tableName: 'wp_fn_numbers',
-      recordIds: touchedRecordIds,
-      adminName: finalOperator,
-      uploadedBy: finalOperator,
-    });
-
-    setSummary({ updated, added, failed, total: targetRows.length, file: fileRef.current, time: new Date().toLocaleString() });
-    
-    finishImport({
-      file_name: fileRef.current || 'Offer Update',
-      total_records: targetRows.length,
-      records_inserted: added,
-      records_updated: updated,
-      records_deleted: 0,
-      records_failed: failed,
-    });
-
-    setImportProgressState('');
-    setIsApplying(false);
-    setDone(true);
   };
 
   const existingRows = rows.filter(r => r._status === 'valid' && !r._isNew);
@@ -286,8 +224,8 @@ export default function ExcelUploadTab() {
                <input type="text" value={operatorName} onChange={e=>setOperatorName(e.target.value)} placeholder="Name" style={{border:'none', outline:'none', fontSize:'0.85rem', width:'100px', fontWeight:700}} />
              </div>
              <button onClick={()=>setStep(1)} style={{...s.outlineBtn, color:'#ef4444', borderColor:'#fecaca', marginLeft:'auto'}}>Cancel</button>
-             <button onClick={()=>executeQueue('all')} style={s.primaryBtn} disabled={isApplying}>
-               {isApplying ? <><RefreshCw size={16} style={{animation:'spin 1s linear infinite'}}/> {importProgress || 'Applying...'}</> : `Apply All (${existingRows.length + newRows.length})`}
+             <button onClick={()=>executeQueue('all')} style={s.primaryBtn}>
+               {`Apply All (${existingRows.length + newRows.length})`}
              </button>
            </div>
            

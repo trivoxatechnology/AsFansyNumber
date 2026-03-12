@@ -143,28 +143,36 @@ const STATUS_STYLES = {
 
 // ─── Main ──────────────────────────────────────────────────────────────────────
 export default function ImportWorkspace() {
-  const [step, setStep]           = useState(1);
-  const [rows, setRows]           = useState([]);
-  const [isParsing, setIsParsing] = useState(false);
-  const [parseProgress, setParseProgress] = useState('');
+  const { runImport, parseSession, updateParseSession, clearParseSession } = useImport();
+
+  // All parse-related state lives in context so it survives navigation
+  const { rows, step, fileName, isParsing, parseProgress, operatorName } = parseSession;
+  const setRows          = (val) => updateParseSession({ rows: typeof val === 'function' ? val(parseSession.rows) : val });
+  const setStep          = (val) => updateParseSession({ step: val });
+  const setIsParsing     = (val) => updateParseSession({ isParsing: val });
+  const setParseProgress = (val) => updateParseSession({ parseProgress: val });
+  const setOperatorName  = (val) => updateParseSession({ operatorName: val });
+  const setFileName      = (val) => updateParseSession({ fileName: val });
+
+  // Local-only UI state (filter, sort, display limit etc. are fine to reset on nav)
   const [importing, setImporting] = useState(false);
-  const { runImport } = useImport();
-  const [operatorName, setOperatorName] = useState(localStorage.getItem('adminUsername') || '');
   const [filter, setFilter] = useState('all');
   const [opFilter, setOpFilter] = useState('all');
   const [displayLimit, setDisplayLimit] = useState(500);
   const [displayLimit3, setDisplayLimit3] = useState(500);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [importDestination, setImportDestination] = useState('store'); // 'store' | 'draft'
+  const [importDestination, setImportDestination] = useState('store');
   const [selected, setSelected] = useState([]);
   const [sortCol, setSortCol] = useState('');
   const [sortDir, setSortDir] = useState('asc');
-  const fileName = useRef('');
+  const fileNameRef = useRef(fileName); // keep ref in sync
+  fileNameRef.current = fileName;
 
   // ── Parse ────────────────────────────────────────────────────────────────────
   const onDrop = useCallback(async (files) => {
     const file = files[0]; if (!file) return;
-    fileName.current = file.name;
+    setFileName(file.name);
+    fileNameRef.current = file.name;
     setIsParsing(true);
     setParseProgress('Reading file...');
     try {
@@ -334,9 +342,8 @@ export default function ImportWorkspace() {
 
   // ── Import ───────────────────────────────────────────────────────────────────
   const handleImport = () => {
-    // Build the cleanRow helper (needs importDestination & fileName in closure)
     const dest = importDestination;
-    const srcFile = fileName.current || 'Unknown';
+    const srcFile = fileNameRef.current || 'Unknown';
     const cleanRow = r => ({
       mobile_number:           r.mobile_number,
       base_price:              r.base_price,
@@ -359,25 +366,65 @@ export default function ImportWorkspace() {
       category:                r.category,
     });
 
-    // Hand off to context — runs in background, survives page navigation
-    runImport({
-      rows,
-      fileName: fileName.current,
-      importDestination: dest,
-      operatorName: operatorName.trim() || localStorage.getItem('adminUsername') || 'Admin',
-      cleanRow,
-    });
+    // Branching Logic: Live Store vs Drafts
+    if (dest === 'draft') {
+      // Drafts: Bypass normal import queue and store JSON blob directly in wp_fn_upload_batches
+      const finalOperator = operatorName.trim() || localStorage.getItem('adminUsername') || 'Admin';
+      const validRows = rows.filter(r => r._status === 'valid' && r._operation !== 'delete').map(cleanRow);
+      
+      fetchWithAuth(`${API_BASE}/wp_fn_upload_batches`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_name: srcFile,
+          operation_type: 'Excel Upload (Draft)',
+          admin_name: finalOperator,
+          uploaded_by: finalOperator,
+          total_records: validRows.length,
+          records_inserted: validRows.length,
+          records_updated: 0,
+          records_failed: 0,
+          status: 'draft',
+          table_name: 'wp_fn_numbers',
+          operation_data: JSON.stringify(validRows), // the DB payload
+        })
+      })
+      .then(res => {
+         if (res && res.ok) alert(`✅ Successfully saved ${validRows.length} numbers to Drafts! They will not appear in the store until you push them to live from Draft Management.`);
+         else alert('❌ Failed to save drafts. Please check the network log.');
+      })
+      .catch(err => {
+         console.error('Draft save failed:', err);
+         alert(`❌ Draft save error: ${err.message}`);
+      });
+      
+      // Reset UI and parse session immediately
+      setShowConfirmModal(false);
+      clearParseSession();
+      setFilter('all');
+      setOpFilter('all');
+      setDisplayLimit(500);
+      setDisplayLimit3(500);
+      setSelected([]);
+    } else {
+      // Live Store: hand off to background worker context
+      runImport({
+        rows,
+        fileName: fileNameRef.current,
+        importDestination: dest,
+        operatorName: operatorName.trim() || localStorage.getItem('adminUsername') || 'Admin',
+        cleanRow,
+      });
 
-    // Reset workspace UI immediately so user can start another import or navigate away
-    setShowConfirmModal(false);
-    setStep(1);
-    setRows([]);
-    setFilter('all');
-    setOpFilter('all');
-    setDisplayLimit(500);
-    setDisplayLimit3(500);
-    setSelected([]);
-    fileName.current = '';
+      // Reset UI and parse session immediately — import continues in background
+      setShowConfirmModal(false);
+      clearParseSession();
+      setFilter('all');
+      setOpFilter('all');
+      setDisplayLimit(500);
+      setDisplayLimit3(500);
+      setSelected([]);
+    }
   };
 
 
@@ -461,7 +508,7 @@ export default function ImportWorkspace() {
               </div>
             ))}
             <div style={{marginLeft:'auto',display:'flex',gap:'12px',alignItems:'center'}}>
-              <button onClick={()=>{setStep(1);setRows([]);setDisplayLimit(500);}} style={{...s.outlineBtn, color:'#ef4444', borderColor:'#fecaca'}}>
+              <button onClick={() => { clearParseSession(); setDisplayLimit(500); }} style={{...s.outlineBtn, color:'#ef4444', borderColor:'#fecaca'}}>
                 <X size={16}/> Cancel
               </button>
               {stats.error+stats.missing>0&&<button onClick={downloadErrors} style={s.smBtn}><Download size={14}/> Errors</button>}
@@ -683,7 +730,7 @@ export default function ImportWorkspace() {
           <div style={s.metaBox}>
             <p style={{fontWeight:700,marginBottom:'10px',fontSize:'0.9rem'}}>Import Details</p>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',fontSize:'0.84rem',color:'var(--text-muted)'}}>  
-              <span>📁 <b>{fileName.current}</b></span>
+              <span>📁 <b>{fileNameRef.current}</b></span>
               <span>🕐 Time: <b>{new Date().toLocaleString()}</b></span>
               <span>🌐 Zone: <b>{Intl.DateTimeFormat().resolvedOptions().timeZone}</b></span>
             </div>

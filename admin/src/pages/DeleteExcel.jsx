@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDropzone } from 'react-dropzone';
 import * as XLSX from 'xlsx';
@@ -35,7 +35,10 @@ export default function DeleteExcel() {
   const [deleteProgressState, setDeleteProgressState] = useState('');
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [deleteDestination, setDeleteDestination] = useState('permanent'); // 'permanent' | 'draft'
-  // no import context needed — delete runs synchronously in this component
+  
+  // Abort guard — set on unmount so async loop can detect page navigation
+  const unmountedRef = useRef(false);
+  useEffect(() => () => { unmountedRef.current = true; }, []);
 
   const onDrop = useCallback(async (files) => {
     const file = files[0];
@@ -159,6 +162,24 @@ export default function DeleteExcel() {
     const CONCURRENCY = 25;
     const MAX_RETRIES = 2;
 
+    // For "Move to Drafts" — pre-fetch full row data BEFORE deleting (rows won't exist after DELETE)
+    let preFetchedRows = [];
+    if (destination === 'draft' && toDelete.length > 0) {
+      setDeleteProgressState('Fetching full number data for draft backup…');
+      const FETCH_CHUNK = 50;
+      for (let i = 0; i < toDelete.length; i += FETCH_CHUNK) {
+        const chunk = toDelete.slice(i, i + FETCH_CHUNK);
+        const results = await Promise.all(
+          chunk.map(r =>
+            fetchWithAuth(`${API_BASE}/wp_fn_numbers/${r._dbId}`)
+              .then(res => res && res.ok ? res.json() : ({ mobile_number: r.mobile_number }))
+              .catch(() => ({ mobile_number: r.mobile_number }))
+          )
+        );
+        preFetchedRows.push(...results);
+      }
+    }
+
     // Reset UI immediately so user can navigate or upload another
     setStep(1);
     setRows([]);
@@ -166,25 +187,20 @@ export default function DeleteExcel() {
 
     const allResults = [];
     for (let i = 0; i < toDelete.length; i += CONCURRENCY) {
+      // If user navigated away, stop processing and write partial log
+      if (unmountedRef.current) break;
+
       const chunk = toDelete.slice(i, i + CONCURRENCY);
       const progressMsg = `${destination === 'draft' ? 'Moving' : 'Deleting'} ${i + 1}–${Math.min(i + CONCURRENCY, toDelete.length)} of ${toDelete.length}…`;
-      setDeleteProgressState(progressMsg);
+      if (!unmountedRef.current) setDeleteProgressState(progressMsg);
 
       const promises = chunk.map(async (row) => {
         let retries = 0;
         while (retries <= MAX_RETRIES) {
           try {
-            if (destination === 'permanent') {
-              const res = await fetchWithAuth(`${API_BASE}/wp_fn_numbers/${row._dbId}`, { method: 'DELETE' });
-              if (res && res.ok) return { ok: true, id: row._dbId };
-            } else {
-              // Move to drafts: hide from store but keep in DB
-              const res = await fetchWithAuth(`${API_BASE}/wp_fn_numbers/${row._dbId}`, {
-                method: 'PUT',
-                body: JSON.stringify({ visibility_status: '0', number_status: 'deleted' })
-              });
-              if (res && res.ok) return { ok: true, id: row._dbId };
-            }
+            // Move to drafts or Permanent: BOTH must be deleted from wp_fn_numbers
+            const res = await fetchWithAuth(`${API_BASE}/wp_fn_numbers/${row._dbId}`, { method: 'DELETE' });
+            if (res && res.ok) return { ok: true, id: row._dbId, data: row };
             retries++;
           } catch (err) {
             retries++;
@@ -199,11 +215,14 @@ export default function DeleteExcel() {
       allResults.push(...chunkResults);
     }
     
+    const deletedRows = [];
+    
     // Count results
     allResults.forEach((result) => {
       if (result.ok) {
         deleted++;
         deletedIds.push(result.id);
+        if (result.data) deletedRows.push(result.data);
       } else {
         failed++;
       }
@@ -211,20 +230,51 @@ export default function DeleteExcel() {
     
     console.log(`Excel delete completed: ${deleted} success, ${failed} failed`);
 
-    // Save log
-    setDeleteProgressState('Saving log…');
+    // If "Move to Drafts" — save the pre-fetched data as a draft batch so DraftManagement can restore them
+    if (destination === 'draft' && preFetchedRows.length > 0) {
+      if (!unmountedRef.current) setDeleteProgressState('Saving draft batch…');
+      // Only save rows that were actually successfully deleted
+      const deletedMobiles = new Set(deletedRows.map(r => String(r.mobile_number)));
+      const draftRows = preFetchedRows.filter(r => deletedMobiles.has(String(r.mobile_number)));
+
+      if (draftRows.length > 0) {
+        try {
+          await fetchWithAuth(`${API_BASE}/wp_fn_upload_batches`, {
+            method: 'POST',
+            body: JSON.stringify({
+              file_name: fileSnapshot || 'Excel Deletion (Draft)',
+              operation_type: 'Excel Delete (Draft)',
+              admin_name: operatorSnapshot,
+              total_records: draftRows.length,
+              records_inserted: draftRows.length,
+              records_updated: 0,
+              records_failed: failed,
+              status: 'draft',
+              table_name: 'wp_fn_numbers',
+              operation_data: JSON.stringify(draftRows),
+            }),
+          });
+        } catch (e) {
+          console.error('Failed to save draft batch:', e);
+        }
+      }
+    }
+
+    // Save operation log — always write this even if user navigated away
+    if (!unmountedRef.current) setDeleteProgressState('Saving log…');
     await writeOperationLog({
       fileName: fileSnapshot || 'Excel Deletion',
       operationType: destination === 'draft' ? 'Excel Delete (Draft)' : 'Excel Delete',
-      operationData: destination === 'draft'
-        ? `Numbers moved to drafts: ${deleted}, Failed: ${failed}`
-        : `Numbers permanently deleted: ${deleted}, Failed: ${failed}`,
+      operationData: unmountedRef.current
+        ? `Numbers Deleted: ${deleted}, Failed: ${failed} (interrupted by navigation)`
+        : `Numbers Deleted: ${deleted}, Failed: ${failed}`,
       totalRecords: toDelete.length,
       tableName: 'wp_fn_numbers',
-      recordIds: deletedIds,
       adminName: operatorSnapshot,
-      uploadedBy: operatorSnapshot,
     });
+
+    // Skip UI updates if component unmounted
+    if (unmountedRef.current) return;
 
     setSummary({
       deleted,

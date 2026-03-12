@@ -5,27 +5,68 @@ import { API_BASE } from '../config/api';
 
 const ImportContext = createContext();
 
-/**
- * Each "job" in the jobs array has this shape:
- * {
- *   id: string,               // unique job id
- *   label: string,            // file name / display label
- *   status: 'running' | 'done' | 'aborted' | 'cleaning',
- *   current: number,          // rows processed so far
- *   total: number,            // total rows
- *   phase: string,            // e.g. "Inserting 1–10 of 500…"
- *   summary: null | { inserted, updated, deleted, failed },
- *   insertedIds: [],          // ref stored separately to avoid re-renders
- *   abortType: null | 'save' | 'delete',
- *   abortRequested: false,
- * }
- */
+// ── DB Job Tracking Helpers ───────────────────────────────────────────────────
+// These write to wp_fn_background_jobs to make progress survive page refresh.
+
+async function dbJobCreate(jobId, fileName, operation, total, adminName) {
+  try {
+    await fetchWithAuth(`${API_BASE}/wp_fn_background_jobs`, {
+      method: 'POST',
+      body: JSON.stringify({
+        job_id:     jobId,
+        file_name:  fileName,
+        operation,
+        status:     'running',
+        total,
+        processed:  0,
+        inserted:   0,
+        updated:    0,
+        deleted:    0,
+        failed:     0,
+        admin_name: adminName,
+      }),
+    });
+  } catch (e) { console.warn('dbJobCreate failed:', e?.message); }
+}
+
+async function dbJobUpdate(jobId, patch) {
+  try {
+    await fetchWithAuth(`${API_BASE}/wp_fn_background_jobs/${jobId}`, {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    });
+  } catch (e) { console.warn('dbJobUpdate failed:', e?.message); }
+}
+
+// ── Context ───────────────────────────────────────────────────────────────────
 
 export function ImportProvider({ children }) {
   const [jobs, setJobs] = useState([]);
   const jobRefs = useRef({}); // id → { insertedIds[], abortRequested, abortType }
 
-  // ── Helpers ──────────────────────────────────────────────────────────────────
+  // ── Parse Session State ─────────────────────────────────────────────────────
+  // Lives here so it survives navigation away from ImportWorkspace
+  const [parseSession, setParseSession] = useState({
+    rows: [],
+    step: 1,
+    fileName: '',
+    isParsing: false,
+    parseProgress: '',
+    operatorName: localStorage.getItem('adminUsername') || '',
+  });
+
+  const updateParseSession = useCallback((patch) => {
+    setParseSession(prev => ({ ...prev, ...patch }));
+  }, []);
+
+  const clearParseSession = useCallback(() => {
+    setParseSession({
+      rows: [], step: 1, fileName: '',
+      isParsing: false, parseProgress: '',
+      operatorName: localStorage.getItem('adminUsername') || '',
+    });
+  }, []);
+
   const updateJob = useCallback((id, patch) => {
     setJobs(prev => prev.map(j => j.id === id ? { ...j, ...patch } : j));
   }, []);
@@ -36,10 +77,6 @@ export function ImportProvider({ children }) {
   }, []);
 
   // ── Public API ────────────────────────────────────────────────────────────────
-  /**
-   * Run a full import job in the background.
-   * Returns the job id immediately.
-   */
   const runImport = useCallback(async ({
     rows,
     fileName,
@@ -54,14 +91,14 @@ export function ImportProvider({ children }) {
     const toDelete  = validRows.filter(r => r._operation === 'delete');
     const total = toInsert.length + toUpdate.length + toDelete.length;
 
-    // Create the ref bucket for this job
+    const finalOperator = operatorName || localStorage.getItem('adminUsername') || 'Admin';
+
     jobRefs.current[id] = {
       insertedIds: [],
       abortRequested: false,
       abortType: null,
     };
 
-    // Add the job to state
     setJobs(prev => [...prev, {
       id,
       label: fileName || 'Import',
@@ -73,16 +110,28 @@ export function ImportProvider({ children }) {
       abortRequested: false,
     }]);
 
-    // ── Run async (survives page navigation because it lives in context) ────────
+    // Create DB job record immediately so it's visible after refresh
+    await dbJobCreate(id, fileName || 'Import', 'Excel Import', total, finalOperator);
+
+    // ── Run async ─────────────────────────────────────────────────────────────
     (async () => {
       const ref = jobRefs.current[id];
       let inserted = 0, updated = 0, deleted = 0, failed = 0;
       const touchedRecordIds = [];
       let completedOps = 0;
       const CONCURRENCY = 10;
+      let lastDbUpdate = 0; // throttle DB updates to every 2s
 
-      const isAborted = () => ref ? ref.abortRequested : false;
+      const isAborted   = () => ref ? ref.abortRequested : false;
       const getAbortType = () => ref ? ref.abortType : null;
+
+      const maybeDbUpdate = async (status = 'running') => {
+        const now = Date.now();
+        if (status !== 'running' || now - lastDbUpdate > 2000) {
+          lastDbUpdate = now;
+          await dbJobUpdate(id, { processed: completedOps, inserted, updated, deleted, failed, status });
+        }
+      };
 
       const processBatch = async (batch, method, phaseLabel) => {
         if (batch.length === 0 || isAborted()) return;
@@ -92,10 +141,7 @@ export function ImportProvider({ children }) {
           const chunk = batch.slice(i, i + CONCURRENCY);
           const msg = `${phaseLabel}: ${i + 1}–${Math.min(i + CONCURRENCY, batch.length)} of ${batch.length}`;
 
-          updateJob(id, {
-            phase: msg,
-            current: completedOps + i,
-          });
+          updateJob(id, { phase: msg, current: completedOps + i });
 
           const promises = chunk.map(async (row) => {
             try {
@@ -134,6 +180,9 @@ export function ImportProvider({ children }) {
             } else { failed++; }
           });
           completedOps += chunk.length;
+          updateJob(id, { current: completedOps });
+
+          await maybeDbUpdate();
 
           if (i + CONCURRENCY < batch.length) {
             await new Promise(r => setTimeout(r, 200));
@@ -146,14 +195,12 @@ export function ImportProvider({ children }) {
         await processBatch(toUpdate, 'PUT',  'Updating');
         await processBatch(toDelete, 'DELETE', 'Deleting');
 
-        const finalOperator = operatorName || localStorage.getItem('adminUsername') || 'Admin';
-
         // ── Stop & Delete path ────────────────────────────────────────────────
         if (isAborted() && getAbortType() === 'delete') {
           updateJob(id, { status: 'cleaning', phase: 'Rolling back inserts…' });
-
-          // Wait for any in-flight requests
+          await maybeDbUpdate('cleaning');
           await new Promise(r => setTimeout(r, 1500));
+
           const finalIds = (ref ? ref.insertedIds : []).filter(Boolean);
           let deletedCount = 0;
 
@@ -166,27 +213,29 @@ export function ImportProvider({ children }) {
                   fetchWithAuth(`${API_BASE}/wp_fn_numbers/${rid}`, { method: 'DELETE' })
                 ));
                 deletedCount += chunk.length;
-                updateJob(id, { phase: `Deleting rollback ${deletedCount}/${finalIds.length}…` });
+                updateJob(id, { phase: `Rolling back ${deletedCount}/${finalIds.length}…` });
                 if (i + CHUNK < finalIds.length) await new Promise(r => setTimeout(r, 200));
               }
             } catch (err) { console.error('Rollback failed:', err); }
           }
 
-          // Write abort + delete log
-          try {
-            await writeOperationLog({
-              fileName: fileName || 'Import Workspace',
-              operationType: finalIds.length > 0 ? 'Excel Import (Aborted & Deleted)' : 'Excel Import (Aborted)',
-              operationData: finalIds.length > 0
-                ? `Import stopped by user. Rolled back ${deletedCount} inserted records.`
-                : `Import stopped by user. 0 records had been inserted.`,
-              totalRecords: deletedCount,
-              tableName: 'wp_fn_numbers',
-              recordIds: finalIds,
-              adminName: finalOperator,
-              uploadedBy: finalOperator,
-            });
-          } catch (logErr) { console.error('Abort log write failed:', logErr); }
+          await writeOperationLog({
+            fileName: fileName || 'Import Workspace',
+            operationType: finalIds.length > 0 ? 'Excel Import (Aborted & Deleted)' : 'Excel Import (Aborted)',
+            operationData: finalIds.length > 0
+              ? `Import stopped by user. Rolled back ${deletedCount} inserted records.`
+              : `Import stopped by user. 0 records had been inserted.`,
+            totalRecords: deletedCount,
+            tableName: 'wp_fn_numbers',
+            adminName: finalOperator,
+          });
+
+          // Final DB job update
+          await dbJobUpdate(id, {
+            status: 'aborted', processed: completedOps,
+            inserted: 0, updated: 0, deleted: deletedCount, failed,
+            finished_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+          });
 
           updateJob(id, {
             status: 'aborted',
@@ -196,8 +245,8 @@ export function ImportProvider({ children }) {
           return;
         }
 
-        // ── Stop & Save path / Normal completion ──────────────────────────────
-        const wasAborted = isAborted(); // stop & save
+        // ── Stop & Save / Normal completion ───────────────────────────────────
+        const wasAborted = isAborted();
         const opType = wasAborted
           ? (importDestination === 'draft' ? 'Draft (Partial Save)' : 'Excel Import (Partial Save)')
           : (importDestination === 'draft' ? 'Draft' : 'Excel Import');
@@ -205,12 +254,17 @@ export function ImportProvider({ children }) {
         await writeOperationLog({
           fileName: fileName || 'Import Workspace',
           operationType: opType,
-          operationData: `Inserted: ${inserted}, Updated: ${updated}, Deleted: ${deleted}, Failed: ${failed}. Dest: ${importDestination}`,
+          operationData: `Inserted: ${inserted}, Updated: ${updated}, Deleted: ${deleted}, Failed: ${failed}`,
           totalRecords: validRows.length,
-          tableName: importDestination === 'draft' ? 'wp_fn_upload_batches' : 'wp_fn_numbers',
-          recordIds: touchedRecordIds,
+          tableName: 'wp_fn_numbers',
           adminName: finalOperator,
-          uploadedBy: finalOperator,
+        });
+
+        // Final DB job update
+        await dbJobUpdate(id, {
+          status: 'done', processed: total,
+          inserted, updated, deleted, failed,
+          finished_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
         });
 
         updateJob(id, {
@@ -222,6 +276,10 @@ export function ImportProvider({ children }) {
 
       } catch (err) {
         console.error('Import job failed:', err);
+        await dbJobUpdate(id, {
+          status: 'failed', processed: completedOps, inserted, updated, deleted, failed,
+          finished_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+        });
         updateJob(id, {
           status: 'done',
           phase: `Error: ${err.message || 'Unknown error'}`,
@@ -233,7 +291,6 @@ export function ImportProvider({ children }) {
     return id;
   }, [updateJob]);
 
-  /** Request abort on a specific job */
   const requestAbort = useCallback((id, type = 'save') => {
     if (jobRefs.current[id]) {
       jobRefs.current[id].abortRequested = true;
@@ -248,6 +305,9 @@ export function ImportProvider({ children }) {
       runImport,
       requestAbort,
       removeJob,
+      parseSession,
+      updateParseSession,
+      clearParseSession,
     }}>
       {children}
     </ImportContext.Provider>

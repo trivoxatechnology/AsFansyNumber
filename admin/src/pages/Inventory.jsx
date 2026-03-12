@@ -31,7 +31,9 @@ export default function Inventory() {
         const res = await fetchWithAuth(`${API_BASE}/wp_fn_numbers?limit=600000`, { signal: ctrl.signal });
         if (res && res.ok) {
           const data = await res.json();
-          setInventory(Array.isArray(data) ? data : []);
+          // Force client-side filter since the API might ignore the query param
+          const liveData = Array.isArray(data) ? data.filter(item => String(item.visibility_status) !== '0') : [];
+          setInventory(liveData);
         }
       } catch (err) {
         if (err?.name !== 'AbortError') {
@@ -78,10 +80,7 @@ export default function Inventory() {
           operationData: `Inventory row updated: ${editingId}`,
           totalRecords: 1,
           tableName: 'wp_fn_numbers',
-          recordId: editingId,
-          recordIds: [editingId],
           adminName: finalUser,
-          uploadedBy: finalUser,
         });
       } else {
         alert("Failed to update database.");
@@ -108,10 +107,7 @@ export default function Inventory() {
           operationData: `Inventory row deleted: ${id}`,
           totalRecords: 1,
           tableName: 'wp_fn_numbers',
-          recordId: id,
-          recordIds: [id],
           adminName: finalUser,
-          uploadedBy: finalUser,
         });
       } else {
         alert("Failed to delete record.");
@@ -178,11 +174,10 @@ export default function Inventory() {
     const opName = actionToRun.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 
     let payload = {};
-    let isDelete = actionToRun === 'delete_numbers';
+    let isDelete = actionToRun === 'delete_numbers' || actionToRun === 'hide_numbers';
     if (actionToRun === 'update_price') payload = { base_price: valueToRun };
     else if (actionToRun === 'update_category') payload = { category: valueToRun };
     else if (actionToRun === 'update_status') payload = { number_status: valueToRun };
-    else if (actionToRun === 'hide_numbers') payload = { visibility_status: '0' };
 
     const allResults = [];
     for (let i = 0; i < ids.length; i += CONCURRENCY) {
@@ -229,24 +224,17 @@ export default function Inventory() {
       }));
     }
 
-    // For 'hide_numbers': write a Draft batch so DraftManagement picks it up
+    // For 'hide_numbers': log a Draft batch entry
     if (actionToRun === 'hide_numbers' && success > 0) {
-      await fetchWithAuth(`${API_BASE}/wp_fn_upload_batches`, {
-        method: 'POST',
-        body: JSON.stringify({
-          file_name: `Inventory Bulk Hide (${new Date().toLocaleDateString('en-IN')})`,
-          operation_type: 'Draft',
-          admin_name: finalUser,
-          uploaded_by: finalUser,
-          total_records: success,
-          records_inserted: 0,
-          records_updated: success,
-          records_failed: failed,
-          status: 'draft',
-          table_name: 'wp_fn_numbers',
-          operation_data: `Hidden from store: ${success} numbers`,
-        })
-      }).catch(err => console.warn('Draft batch write failed:', err));
+      await writeOperationLog({
+        fileName: `Inventory Bulk Hide (${new Date().toLocaleDateString('en-IN')})`,
+        operationType: 'Saved as Draft',
+        operationData: `Hide Numbers: ${success}, Failed: ${failed}`,
+        totalRecords: success,
+        status: 'draft',
+        tableName: 'wp_fn_numbers',
+        adminName: finalUser,
+      });
     }
 
     // Operation log
@@ -256,9 +244,7 @@ export default function Inventory() {
       operationData: `${opName}: ${success} success, ${failed} failed`,
       totalRecords: ids.length,
       tableName: 'wp_fn_numbers',
-      recordIds: successfulIds,
       adminName: finalUser,
-      uploadedBy: finalUser,
     });
 
     setBulkProgress('');
