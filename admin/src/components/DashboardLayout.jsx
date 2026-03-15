@@ -2,6 +2,7 @@ import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { LayoutDashboard, FileSpreadsheet, LogOut, Database, Tag, Trash2, FileText } from 'lucide-react';
 import BackgroundImportWidget from './BackgroundImportWidget';
 import { logout } from '../utils/authService';
+import ErrorBoundary from '../utils/ErrorBoundary';
 
 export default function DashboardLayout() {
   const navigate = useNavigate();
@@ -72,7 +73,9 @@ export default function DashboardLayout() {
         </header>
 
         <div style={styles.content}>
-          <Outlet />
+          <ErrorBoundary>
+            <Outlet />
+          </ErrorBoundary>
         </div>
       </main>
     </div>

@@ -68,14 +68,7 @@ export async function login(username, password) {
   const isUsernameMatch = username.trim().toLowerCase() === ADMIN_USERNAME.trim().toLowerCase();
   const isHashMatch = hash.trim().toLowerCase() === ADMIN_PASSWORD_HASH.trim().toLowerCase();
 
-  console.log('Login attempt debug:', {
-    providedUsername: username.trim().toLowerCase(),
-    expectedUsername: ADMIN_USERNAME.trim().toLowerCase(),
-    isUsernameMatch,
-    providedHash: hash.trim().toLowerCase(),
-    expectedHash: ADMIN_PASSWORD_HASH.trim().toLowerCase(),
-    isHashMatch
-  });
+  // Debug removed in v4.0 — never log credentials in production
 
   if (!isUsernameMatch || !isHashMatch) {
     return { success: false, error: 'Invalid username or password.' };
@@ -125,11 +118,12 @@ export async function generateHash(password) {
   return sha256(password);
 }
 
-// Ensure the user is never permanently locked out while developing
-window.__forceLogin = () => {
-  const token = buildToken('admin');
-  localStorage.setItem(TOKEN_KEY, token);
-  localStorage.setItem(USERNAME_KEY, 'admin');
-  console.log('✅ Forced login successful. Navigate to /dashboard or refresh.');
-  window.location.href = '/dashboard';
-};
+// Dev-only escape hatch — never available in production builds
+if (import.meta.env.DEV) {
+  window.__forceLogin = () => {
+    const token = buildToken('admin');
+    localStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(USERNAME_KEY, 'admin');
+    window.location.href = '/dashboard';
+  };
+}

@@ -1,42 +1,88 @@
 import { API_BASE } from '../config/api';
 
-// Utility for making authenticated API calls
+/**
+ * Null-safe fallback response — prevents 'Cannot read property of null' errors.
+ * Every page component can safely call `res.json()` without checking null first.
+ */
+const SAFE_FALLBACK = {
+  ok: false,
+  status: 0,
+  json: async () => [],
+  text: async () => '',
+  headers: new Headers(),
+};
+
 export const fetchWithAuth = async (url, options = {}) => {
   const token = localStorage.getItem('adminToken');
-  
-  const authOptions = {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-      ...options.headers,
-    },
-  };
+  if (!token) {
+    // No token = definitely not authenticated, redirect
+    window.location.href = '/login';
+    return SAFE_FALLBACK;
+  }
 
-  try {
-    const response = await fetch(url, authOptions);
-    
-    // Handle authentication errors
-    if (response.status === 401) {
-      localStorage.removeItem('adminToken');
-      localStorage.removeItem('adminUsername');
-      window.location.href = '/login';
-      return null;
+  const MAX_RETRIES = 2;
+  const TIMEOUT_MS  = 30000;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const ctrl  = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+
+    try {
+      const res = await fetch(url, {
+        ...options,
+        signal: options.signal || ctrl.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          ...options.headers,
+        },
+      });
+      clearTimeout(timer);
+
+      if (res.status === 401) {
+        localStorage.removeItem('adminToken');
+        localStorage.removeItem('adminUsername');
+        window.location.href = '/login';
+        return SAFE_FALLBACK;
+      }
+
+      if (res.status >= 500 && attempt < MAX_RETRIES) {
+        await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
+        continue;
+      }
+
+      return res;
+
+    } catch (err) {
+      clearTimeout(timer);
+      if (attempt < MAX_RETRIES) {
+        await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
+        continue;
+      }
+      console.error('fetchWithAuth failed:', url, err?.message);
     }
-    
-    return response;
-  } catch (error) {
-    console.error('API call failed:', error);
-    throw error;
+  }
+
+  return SAFE_FALLBACK;
+};
+
+/**
+ * Safely extract JSON from a response. Always returns a value, never throws.
+ * Handles both old API format (array) and new v4.0 format ({data, total}).
+ */
+export const safeJson = async (res) => {
+  if (!res || !res.ok) return null;
+  try {
+    return await res.json();
+  } catch {
+    return null;
   }
 };
 
-// Utility for making authenticated GET requests
 export const getWithAuth = async (url, options = {}) => {
   return fetchWithAuth(url, { method: 'GET', ...options });
 };
 
-// Utility for making authenticated POST requests
 export const postWithAuth = async (url, data, options = {}) => {
   return fetchWithAuth(url, {
     method: 'POST',
@@ -45,7 +91,6 @@ export const postWithAuth = async (url, data, options = {}) => {
   });
 };
 
-// Utility for making authenticated PUT requests
 export const putWithAuth = async (url, data, options = {}) => {
   return fetchWithAuth(url, {
     method: 'PUT',
@@ -54,7 +99,6 @@ export const putWithAuth = async (url, data, options = {}) => {
   });
 };
 
-// Utility for making authenticated DELETE requests
 export const deleteWithAuth = async (url, options = {}) => {
   return fetchWithAuth(url, { method: 'DELETE', ...options });
 };

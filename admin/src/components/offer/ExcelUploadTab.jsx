@@ -5,6 +5,8 @@ import { CloudUpload, Download, RefreshCw, Check, CircleCheck } from 'lucide-rea
 import { API_BASE } from '../../config/api';
 import { classifyNumber } from '../../utils/PatternEngine';
 import { useImport } from '../../context/ImportContext';
+import { useToast } from '../../components/Toast';
+import { fetchWithAuth } from '../../utils/api';
 
 function validateOfferRow(row, idx) {
   const errors = [];
@@ -30,6 +32,7 @@ function validateOfferRow(row, idx) {
 }
 
 export default function ExcelUploadTab() {
+  const toast = useToast();
   const [rows, setRows] = useState([]);
   const [step, setStep] = useState(1);
   const [isParsing, setIsParsing] = useState(false);
@@ -37,7 +40,8 @@ export default function ExcelUploadTab() {
   const [done, setDone] = useState(false);
   const [summary, setSummary] = useState(null);
   const [parseProgress, setParseProgress] = useState('');
-  const { runImport } = useImport();
+  const [fetchError, setFetchError] = useState(false);
+  const { runBulkImport } = useImport();
   
   const fileRef = useRef('');
 
@@ -68,18 +72,27 @@ export default function ExcelUploadTab() {
       
       const validRows = json.filter(r=>r.mobile_number);
 
-      setParseProgress('Fetching existing database to compare...');
+      setParseProgress('Looking up numbers in database...');
       let existingMap = {};
       try {
-        const res = await fetch(`${API_BASE}/wp_fn_numbers?limit=600000&fields=number_id,mobile_number,offer_price`);
-        if (res.ok) {
-          const d = await res.json();
-          if (Array.isArray(d)) d.forEach(r => { 
-             existingMap[String(r.mobile_number)] = { id: r.number_id, price: r.offer_price }; 
-          });
+        setFetchError(false);
+        const lookupRes = await fetchWithAuth(`${API_BASE}/wp_fn_numbers/bulk-lookup`, {
+          method: 'POST',
+          body: JSON.stringify({ mobile_numbers: validRows.map(r => String(r.mobile_number)) })
+        });
+        if (lookupRes && lookupRes.ok) {
+          const lookupData = await lookupRes.json();
+          if (lookupData.matched) {
+            lookupData.matched.forEach(r => {
+              existingMap[String(r.mobile_number)] = { id: r.number_id, price: r.offer_price };
+            });
+          }
+        } else {
+          setFetchError(true);
         }
       } catch (e) {
         console.error('API fetch error: ', e);
+        setFetchError(true);
       }
 
       setParseProgress(`Validating ${validRows.length.toLocaleString()} rows...`);
@@ -113,7 +126,7 @@ export default function ExcelUploadTab() {
 
       setRows(parsed);
       setStep(2);
-    } catch(e) { alert('Parse error: ' + e.message); }
+    } catch(e) { toast.error('Parse error: ' + e.message); }
     finally { setIsParsing(false); setParseProgress(''); }
   }, []);
 
@@ -131,52 +144,48 @@ export default function ExcelUploadTab() {
   };
 
   const executeQueue = (mode) => {
+    const operatorSnapshot = operatorName.trim() || localStorage.getItem('adminUsername') || 'Admin';
     let targetRows = [];
-    if (mode === 'all') targetRows = rows.filter(r=>r._status==='valid');
-    if (mode === 'existing') targetRows = rows.filter(r=>r._status==='valid' && !r._isNew);
-    if (mode === 'new') targetRows = rows.filter(r=>r._status==='valid' && r._isNew);
+    if (mode === 'all') targetRows = rows.filter(r => r._status === 'valid');
+    if (mode === 'existing') targetRows = rows.filter(r => r._status === 'valid' && !r._isNew);
+    if (mode === 'new') targetRows = rows.filter(r => r._status === 'valid' && r._isNew);
 
+    if (targetRows.length === 0) return;
     const srcFile = fileRef.current || 'Offer Upload';
 
-    // Build cleanRow for the background import engine
-    const cleanRow = (r) => {
-      if (r._isNew) {
-        // Insert path — build full payload
-        const pattern = classifyNumber(r.mobile_number);
-        const payload = {
-          mobile_number: r.mobile_number,
-          base_price: r.offer_price,
-          offer_price: r.offer_price,
-          number_status: 'available',
-          visibility_status: '1',
-          category: pattern.category,
-          pattern_type: pattern.pattern_type,
-          inventory_source: srcFile,
-        };
-        if (r.offer_start_date) payload.offer_start_date = r.offer_start_date;
-        if (r.offer_end_date) payload.offer_end_date = r.offer_end_date;
-        if (r.is_featured) payload.is_featured = r.is_featured;
-        return payload;
-      } else {
-        // Update path — only send changed offer fields
-        const payload = { offer_price: r.offer_price };
-        if (r.offer_start_date) payload.offer_start_date = r.offer_start_date;
-        if (r.offer_end_date) payload.offer_end_date = r.offer_end_date;
-        if (r.is_featured) payload.is_featured = r.is_featured;
-        return payload;
-      }
-    };
-
-    // Hand off to background import engine (survives page navigation)
-    runImport({
+    runBulkImport({
       rows: targetRows,
       fileName: srcFile,
       importDestination: 'store',
-      operatorName: operatorName.trim() || localStorage.getItem('adminUsername') || 'Admin',
-      cleanRow,
+      operatorName: operatorSnapshot,
+      cleanRow: (r) => {
+        if (r._isNew) {
+          const pattern = classifyNumber(r.mobile_number);
+          const payload = {
+            mobile_number: r.mobile_number,
+            base_price: r.offer_price,
+            offer_price: r.offer_price,
+            number_status: 'available',
+            visibility_status: '1',
+            category: pattern.category,
+            pattern_type: pattern.pattern_type,
+            inventory_source: srcFile,
+          };
+          if (r.offer_start_date) payload.offer_start_date = r.offer_start_date;
+          if (r.offer_end_date) payload.offer_end_date = r.offer_end_date;
+          if (r.is_featured) payload.is_featured = r.is_featured;
+          return payload;
+        } else {
+          const payload = { offer_price: r.offer_price };
+          if (r.offer_start_date) payload.offer_start_date = r.offer_start_date;
+          if (r.offer_end_date) payload.offer_end_date = r.offer_end_date;
+          if (r.is_featured) payload.is_featured = r.is_featured;
+          if (r._numId) payload.number_id = r._numId;
+          return payload;
+        }
+      }
     });
 
-    // Reset UI immediately — import continues in background via ImportContext
     setStep(1);
     setRows([]);
     setDone(false);
@@ -189,6 +198,12 @@ export default function ExcelUploadTab() {
   return (
     <div style={{animation:'fadeIn 0.3s ease-out'}}>
       <style>{`@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}`}</style>
+      
+      {fetchError && (
+        <div style={{background:'#fee2e2', color:'#dc2626', padding:'8px 16px', borderRadius:'8px', fontSize:'0.85rem', fontWeight:700, border:'1px solid #fecaca', display:'flex', alignItems:'center', gap:'8px', marginBottom:'20px'}}>
+          <RefreshCw size={14}/> ⚠️ Server busy. Showing stale validation data.
+        </div>
+      )}
       
       {step===1 && (
         <div style={s.card}>

@@ -3,14 +3,17 @@ import { Search, Edit2, Check, X, RefreshCw } from 'lucide-react';
 import { writeOperationLog } from '../../utils/operationLog';
 import { fetchWithAuth } from '../../utils/api';
 import { API_BASE } from '../../config/api';
+import { useToast } from '../../components/Toast';
 
 export default function ManualUpdateTab() {
+  const toast = useToast();
   const [inventory, setInventory] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [selectedIds, setSelectedIds] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
   const [displayLimit, setDisplayLimit] = useState(100);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [vendorFilter, setVendorFilter] = useState('');
@@ -23,13 +26,21 @@ export default function ManualUpdateTab() {
     setLoading(true);
     const opts = signal ? { signal } : {};
     try {
+      setFetchError(false);
       const res = await fetchWithAuth(`${API_BASE}/wp_fn_numbers?limit=600000`, opts);
       if (res && res.ok) {
         const data = await res.json();
-        setInventory(Array.isArray(data) ? data : []);
+        // Handle both array and {data, total} API response formats
+        const arr = Array.isArray(data) ? data : (data?.data || []);
+        setInventory(arr);
+      } else {
+        setFetchError(true);
       }
     } catch (err) {
-      if (err?.name !== 'AbortError') console.error('API Error:', err);
+      if (err?.name !== 'AbortError') {
+        console.error('API Error:', err);
+        setFetchError(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -79,13 +90,13 @@ export default function ManualUpdateTab() {
       }
     } catch(err) {
       console.error(err);
-      alert('Save failed.');
+      toast.error('Save failed.');
     }
     setIsProcessing(false);
   };
 
   const handleBulkSubmit = async () => {
-    if (selectedIds.length === 0) return alert('No numbers selected');
+    if (selectedIds.length === 0) return toast.warn('No numbers selected');
     setIsProcessing(true);
     let success = 0;
     
@@ -96,7 +107,8 @@ export default function ManualUpdateTab() {
     if (bulkForm.offer_end_date) payload.offer_end_date = bulkForm.offer_end_date;
     if (bulkForm.is_featured) payload.is_featured = bulkForm.is_featured;
 
-    const CHUNK = 5;
+    const CHUNK = 3;
+    const BATCH_DELAY = 1000;
     for (let i = 0; i < selectedIds.length; i+=CHUNK) {
       const chunk = selectedIds.slice(i, i+CHUNK);
       const results = await Promise.all(
@@ -106,6 +118,9 @@ export default function ManualUpdateTab() {
         }).then(r=>r&&r.ok?1:0).catch(()=>0))
       );
       success += results.reduce((s,v)=>s+v, 0);
+      if (i + CHUNK < selectedIds.length) {
+        await new Promise(r => setTimeout(r, BATCH_DELAY));
+      }
     }
 
     setInventory(prev => prev.map(item => selectedIds.includes(item.number_id) ? { ...item, ...payload } : item));
@@ -122,7 +137,7 @@ export default function ManualUpdateTab() {
     setSelectedIds([]);
     setBulkModalOpen(false);
     setIsProcessing(false);
-    alert(`Successfully updated ${success} numbers.`);
+    toast.success(`Successfully updated ${success} numbers.`);
   };
 
   const categories = [...new Set(inventory.map(i => i.number_category).filter(Boolean))];
@@ -138,6 +153,11 @@ export default function ManualUpdateTab() {
 
   return (
     <div style={{animation:'fadeIn 0.3s ease-out'}}>
+      {fetchError && (
+        <div style={{background:'#fee2e2', color:'#dc2626', padding:'8px 16px', borderRadius:'8px', fontSize:'0.85rem', fontWeight:700, border:'1px solid #fecaca', display:'flex', alignItems:'center', gap:'8px', marginBottom:'16px'}}>
+          <RefreshCw size={14}/> ⚠️ Server busy. Showing last known inventory.
+        </div>
+      )}
       {/* Top Bar for Filters */}
       <div style={{display:'flex', gap:'12px', marginBottom:'20px', flexWrap:'wrap'}}>
          <div style={{position:'relative', width:'300px'}}>

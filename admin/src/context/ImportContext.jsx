@@ -1,29 +1,16 @@
-import React, { createContext, useContext, useState, useRef, useCallback } from 'react';
+import React, { createContext, useContext, useState, useRef, useCallback, useEffect } from 'react';
 import { fetchWithAuth } from '../utils/api';
 import { writeOperationLog } from '../utils/operationLog';
 import { API_BASE } from '../config/api';
 
 const ImportContext = createContext();
 
-// ── DB Job Tracking Helpers ───────────────────────────────────────────────────
-// These write to wp_fn_background_jobs to make progress survive page refresh.
-
 async function dbJobCreate(jobId, fileName, operation, total, adminName) {
   try {
     await fetchWithAuth(`${API_BASE}/wp_fn_background_jobs`, {
       method: 'POST',
       body: JSON.stringify({
-        job_id:     jobId,
-        file_name:  fileName,
-        operation,
-        status:     'running',
-        total,
-        processed:  0,
-        inserted:   0,
-        updated:    0,
-        deleted:    0,
-        failed:     0,
-        admin_name: adminName,
+        job_id: jobId, file_name: fileName, operation, status: 'running', total, processed: 0, admin_name: adminName,
       }),
     });
   } catch (e) { console.warn('dbJobCreate failed:', e?.message); }
@@ -38,34 +25,47 @@ async function dbJobUpdate(jobId, patch) {
   } catch (e) { console.warn('dbJobUpdate failed:', e?.message); }
 }
 
-// ── Context ───────────────────────────────────────────────────────────────────
-
 export function ImportProvider({ children }) {
   const [jobs, setJobs] = useState([]);
-  const jobRefs = useRef({}); // id → { insertedIds[], abortRequested, abortType }
+  const [dbJobs, setDbJobs] = useState([]);
+  const mountedRef = useRef(true);
+  // AbortController map — keyed by job ID
+  const abortControllers = useRef({});
 
-  // ── Parse Session State ─────────────────────────────────────────────────────
-  // Lives here so it survives navigation away from ImportWorkspace
+  const fetchDbJobs = useCallback(async () => {
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/wp_fn_background_jobs?limit=30&order=started_at&dir=desc`);
+      if (res && res.ok) {
+        const json = await res.json();
+        const data = Array.isArray(json) ? json : (json?.data || []);
+        setDbJobs(data);
+      }
+    } catch (e) { }
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    fetchDbJobs();
+    const timer = setInterval(() => {
+      if (jobs.some(j => j.status === 'running') || dbJobs.some(j => j.status === 'running')) {
+        fetchDbJobs();
+      }
+    }, 15000);
+    return () => { mountedRef.current = false; clearInterval(timer); };
+  }, [fetchDbJobs, jobs, dbJobs]);
+
+  const hasActiveJobs = jobs.some(j => j.status === 'running') || dbJobs.some(j => j.status === 'running');
+
   const [parseSession, setParseSession] = useState({
-    rows: [],
-    step: 1,
-    fileName: '',
-    isParsing: false,
-    parseProgress: '',
+    rows: [], step: 1, fileName: '', isParsing: false, parseProgress: '',
     operatorName: localStorage.getItem('adminUsername') || '',
   });
 
-  const updateParseSession = useCallback((patch) => {
-    setParseSession(prev => ({ ...prev, ...patch }));
-  }, []);
-
-  const clearParseSession = useCallback(() => {
-    setParseSession({
-      rows: [], step: 1, fileName: '',
-      isParsing: false, parseProgress: '',
-      operatorName: localStorage.getItem('adminUsername') || '',
-    });
-  }, []);
+  const updateParseSession = useCallback((patch) => setParseSession(prev => ({ ...prev, ...patch })), []);
+  const clearParseSession = useCallback(() => setParseSession({
+    rows: [], step: 1, fileName: '', isParsing: false, parseProgress: '',
+    operatorName: localStorage.getItem('adminUsername') || '',
+  }), []);
 
   const updateJob = useCallback((id, patch) => {
     setJobs(prev => prev.map(j => j.id === id ? { ...j, ...patch } : j));
@@ -73,241 +73,154 @@ export function ImportProvider({ children }) {
 
   const removeJob = useCallback((id) => {
     setJobs(prev => prev.filter(j => j.id !== id));
-    delete jobRefs.current[id];
+    // Clean up AbortController
+    if (abortControllers.current[id]) {
+      delete abortControllers.current[id];
+    }
   }, []);
 
-  // ── Public API ────────────────────────────────────────────────────────────────
-  const runImport = useCallback(async ({
-    rows,
-    fileName,
-    importDestination,
-    operatorName,
-    cleanRow,
-  }) => {
-    const id = `job_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const validRows = rows.filter(r => r._status === 'valid');
-    const toInsert  = validRows.filter(r => r._operation === 'insert');
-    const toUpdate  = validRows.filter(r => r._operation === 'update');
-    const toDelete  = validRows.filter(r => r._operation === 'delete');
-    const total = toInsert.length + toUpdate.length + toDelete.length;
+  const removeDbJob = useCallback(async (jobId) => {
+    setDbJobs(prev => prev.filter(j => j.job_id !== jobId && j.id !== jobId));
+    try {
+      await fetchWithAuth(`${API_BASE}/wp_fn_background_jobs/${jobId}`, { method: 'DELETE' });
+    } catch (e) { /* ignore */ }
+  }, []);
 
+  // Cancel a running job via AbortController
+  const cancelJob = useCallback(async (id) => {
+    const ctrl = abortControllers.current[id];
+    if (ctrl) {
+      ctrl.abort();
+      delete abortControllers.current[id];
+    }
+    updateJob(id, { status: 'done', phase: 'Cancelled by user' });
+    await dbJobUpdate(id, { status: 'cancelled' });
+    fetchDbJobs();
+  }, [updateJob, fetchDbJobs]);
+
+  // Force-dismiss a stuck DB job (mark as cancelled in DB)
+  const forceStopDbJob = useCallback(async (jobId) => {
+    await dbJobUpdate(jobId, { status: 'cancelled' });
+    fetchDbJobs();
+  }, [fetchDbJobs]);
+
+  const runBulkImport = useCallback(async ({
+    rows, fileName, importDestination, operatorName, cleanRow
+  }) => {
+    const id = `bulk_imp_${Date.now()}`;
+    const validRows = rows.filter(r => r._status === 'valid');
+    const total = validRows.length;
     const finalOperator = operatorName || localStorage.getItem('adminUsername') || 'Admin';
 
-    jobRefs.current[id] = {
-      insertedIds: [],
-      abortRequested: false,
-      abortType: null,
-    };
+    // Create AbortController for this job
+    const ctrl = new AbortController();
+    abortControllers.current[id] = ctrl;
 
-    setJobs(prev => [...prev, {
-      id,
-      label: fileName || 'Import',
-      status: 'running',
-      current: 0,
-      total,
-      phase: 'Starting…',
-      summary: null,
-      abortRequested: false,
-    }]);
+    setJobs(prev => [...prev, { id, label: fileName || 'Import', status: 'running', current: 0, total, phase: 'Starting...' }]);
+    await dbJobCreate(id, fileName || 'Import', 'Bulk Import', total, finalOperator);
 
-    // Create DB job record immediately so it's visible after refresh
-    await dbJobCreate(id, fileName || 'Import', 'Excel Import', total, finalOperator);
-
-    // ── Run async ─────────────────────────────────────────────────────────────
     (async () => {
-      const ref = jobRefs.current[id];
-      let inserted = 0, updated = 0, deleted = 0, failed = 0;
-      const touchedRecordIds = [];
-      let completedOps = 0;
-      const CONCURRENCY = 10;
-      let lastDbUpdate = 0; // throttle DB updates to every 2s
-
-      const isAborted   = () => ref ? ref.abortRequested : false;
-      const getAbortType = () => ref ? ref.abortType : null;
-
-      const maybeDbUpdate = async (status = 'running') => {
-        const now = Date.now();
-        if (status !== 'running' || now - lastDbUpdate > 2000) {
-          lastDbUpdate = now;
-          await dbJobUpdate(id, { processed: completedOps, inserted, updated, deleted, failed, status });
-        }
-      };
-
-      const processBatch = async (batch, method, phaseLabel) => {
-        if (batch.length === 0 || isAborted()) return;
-        for (let i = 0; i < batch.length; i += CONCURRENCY) {
-          if (isAborted()) break;
-
-          const chunk = batch.slice(i, i + CONCURRENCY);
-          const msg = `${phaseLabel}: ${i + 1}–${Math.min(i + CONCURRENCY, batch.length)} of ${batch.length}`;
-
-          updateJob(id, { phase: msg, current: completedOps + i });
-
-          const promises = chunk.map(async (row) => {
-            try {
-              const payload = method === 'DELETE' ? { number_status: 'deleted' } : cleanRow(row);
-              let targetPath = `${API_BASE}/wp_fn_numbers`;
-              if (method === 'PUT' || method === 'DELETE') {
-                targetPath = row._dbId
-                  ? `${API_BASE}/wp_fn_numbers/${row._dbId}`
-                  : `${API_BASE}/wp_fn_numbers?mobile_number=${row.mobile_number}`;
-              }
-              const res = await fetchWithAuth(targetPath, {
-                method: method === 'DELETE' ? 'PUT' : method,
-                body: JSON.stringify(payload),
-              });
-              if (res && res.ok) {
-                const body = method === 'POST' ? await res.json().catch(() => null) : null;
-                const resId = body?.id ?? body?.insert_id ?? row._dbId ?? null;
-                if (method === 'POST' && resId && ref) ref.insertedIds.push(resId);
-                return { ok: true, id: resId, ref: row.mobile_number };
-              }
-              return { ok: false, ref: row.mobile_number };
-            } catch (err) {
-              console.error(`${phaseLabel} Error:`, err);
-              return { ok: false, ref: row.mobile_number };
-            }
-          });
-
-          const results = await Promise.all(promises);
-          results.forEach(r => {
-            if (r.ok) {
-              if (method === 'POST') inserted++;
-              else if (method === 'PUT') updated++;
-              else if (method === 'DELETE') deleted++;
-              if (r.id) touchedRecordIds.push(r.id);
-              else if (r.ref) touchedRecordIds.push(`mobile:${r.ref}`);
-            } else { failed++; }
-          });
-          completedOps += chunk.length;
-          updateJob(id, { current: completedOps });
-
-          await maybeDbUpdate();
-
-          if (i + CONCURRENCY < batch.length) {
-            await new Promise(r => setTimeout(r, 200));
-          }
-        }
-      };
+      let processed = 0, lastDbUpdate = 0;
+      const CHUNK_SIZE = 1000;
+      const endpoint = importDestination === 'draft' ? `${API_BASE}/wp_fn_draft_numbers/bulk-insert` : `${API_BASE}/wp_fn_numbers/bulk-insert`;
 
       try {
-        await processBatch(toInsert, 'POST', 'Inserting');
-        await processBatch(toUpdate, 'PUT',  'Updating');
-        await processBatch(toDelete, 'DELETE', 'Deleting');
-
-        // ── Stop & Delete path ────────────────────────────────────────────────
-        if (isAborted() && getAbortType() === 'delete') {
-          updateJob(id, { status: 'cleaning', phase: 'Rolling back inserts…' });
-          await maybeDbUpdate('cleaning');
-          await new Promise(r => setTimeout(r, 1500));
-
-          const finalIds = (ref ? ref.insertedIds : []).filter(Boolean);
-          let deletedCount = 0;
-
-          if (finalIds.length > 0) {
-            try {
-              const CHUNK = 10;
-              for (let i = 0; i < finalIds.length; i += CHUNK) {
-                const chunk = finalIds.slice(i, i + CHUNK);
-                await Promise.all(chunk.map(rid =>
-                  fetchWithAuth(`${API_BASE}/wp_fn_numbers/${rid}`, { method: 'DELETE' })
-                ));
-                deletedCount += chunk.length;
-                updateJob(id, { phase: `Rolling back ${deletedCount}/${finalIds.length}…` });
-                if (i + CHUNK < finalIds.length) await new Promise(r => setTimeout(r, 200));
-              }
-            } catch (err) { console.error('Rollback failed:', err); }
+        for (let i = 0; i < validRows.length; i += CHUNK_SIZE) {
+          // Check if cancelled
+          if (ctrl.signal.aborted) {
+            updateJob(id, { status: 'done', phase: `Cancelled at ${processed}/${total}` });
+            await dbJobUpdate(id, { status: 'cancelled', processed });
+            return;
           }
 
-          await writeOperationLog({
-            fileName: fileName || 'Import Workspace',
-            operationType: finalIds.length > 0 ? 'Excel Import (Aborted & Deleted)' : 'Excel Import (Aborted)',
-            operationData: finalIds.length > 0
-              ? `Import stopped by user. Rolled back ${deletedCount} inserted records.`
-              : `Import stopped by user. 0 records had been inserted.`,
-            totalRecords: deletedCount,
-            tableName: 'wp_fn_numbers',
-            adminName: finalOperator,
+          const chunk = validRows.slice(i, i + CHUNK_SIZE).map(r => cleanRow(r));
+          const res = await fetchWithAuth(endpoint, {
+            method: 'POST',
+            body: JSON.stringify({ records: chunk }),
+            signal: ctrl.signal,
           });
-
-          // Final DB job update
-          await dbJobUpdate(id, {
-            status: 'aborted', processed: completedOps,
-            inserted: 0, updated: 0, deleted: deletedCount, failed,
-            finished_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
-          });
-
-          updateJob(id, {
-            status: 'aborted',
-            phase: `Aborted — ${deletedCount} records rolled back`,
-            summary: { inserted: 0, updated: 0, deleted: deletedCount, failed: 0, aborted: true },
-          });
-          return;
+          if (!res || !res.ok) {
+            const errText = await (res ? res.text() : Promise.resolve('Unknown Network Error'));
+            throw new Error(`API Error: ${errText}`);
+          }
+          processed += chunk.length;
+          updateJob(id, { current: processed, phase: `Importing ${processed}/${total}...` });
+          if (Date.now() - lastDbUpdate > 3000) {
+            lastDbUpdate = Date.now();
+            await dbJobUpdate(id, { processed, status: 'running' });
+          }
         }
-
-        // ── Stop & Save / Normal completion ───────────────────────────────────
-        const wasAborted = isAborted();
-        const opType = wasAborted
-          ? (importDestination === 'draft' ? 'Draft (Partial Save)' : 'Excel Import (Partial Save)')
-          : (importDestination === 'draft' ? 'Draft' : 'Excel Import');
-
-        await writeOperationLog({
-          fileName: fileName || 'Import Workspace',
-          operationType: opType,
-          operationData: `Inserted: ${inserted}, Updated: ${updated}, Deleted: ${deleted}, Failed: ${failed}`,
-          totalRecords: validRows.length,
-          tableName: 'wp_fn_numbers',
-          adminName: finalOperator,
-        });
-
-        // Final DB job update
-        await dbJobUpdate(id, {
-          status: 'done', processed: total,
-          inserted, updated, deleted, failed,
-          finished_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
-        });
-
-        updateJob(id, {
-          status: 'done',
-          current: total,
-          phase: wasAborted ? 'Stopped & saved' : 'Complete',
-          summary: { inserted, updated, deleted, failed, aborted: wasAborted },
-        });
-
+        await dbJobUpdate(id, { status: 'done', processed: total });
+        updateJob(id, { status: 'done', current: total, phase: 'Complete' });
       } catch (err) {
-        console.error('Import job failed:', err);
-        await dbJobUpdate(id, {
-          status: 'failed', processed: completedOps, inserted, updated, deleted, failed,
-          finished_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
-        });
-        updateJob(id, {
-          status: 'done',
-          phase: `Error: ${err.message || 'Unknown error'}`,
-          summary: { inserted, updated, deleted, failed, aborted: false, error: true },
-        });
+        if (err?.name === 'AbortError') {
+          updateJob(id, { status: 'done', phase: `Cancelled at ${processed}/${total}` });
+          await dbJobUpdate(id, { status: 'cancelled', processed });
+        } else {
+          const errMsg = err?.message || 'Unknown error';
+          await dbJobUpdate(id, { status: 'failed', processed, phase: 'Error: ' + errMsg });
+          updateJob(id, { status: 'done', phase: 'Error: ' + errMsg });
+        }
       }
     })();
-
-    return id;
   }, [updateJob]);
 
-  const requestAbort = useCallback((id, type = 'save') => {
-    if (jobRefs.current[id]) {
-      jobRefs.current[id].abortRequested = true;
-      jobRefs.current[id].abortType = type;
-      updateJob(id, { abortRequested: true });
-    }
+  const runDeleteOperation = useCallback(async ({ toDelete, fileName, destination, operatorName }) => {
+    const id = `bulk_del_${Date.now()}`;
+    const total = toDelete.length;
+    const finalOperator = operatorName || localStorage.getItem('adminUsername') || 'Admin';
+
+    const ctrl = new AbortController();
+    abortControllers.current[id] = ctrl;
+
+    setJobs(prev => [...prev, { id, label: fileName || 'Delete', status: 'running', current: 0, total, phase: 'Deleting...' }]);
+    await dbJobCreate(id, fileName, 'Bulk Delete', total, finalOperator);
+
+    (async () => {
+      const ids = toDelete.map(r => r._dbId);
+      const CHUNK_SIZE = 2000;
+      const endpoint = destination === 'draft' ? `${API_BASE}/wp_fn_numbers/bulk-move-to-draft` : `${API_BASE}/wp_fn_numbers/bulk-delete`;
+      let processed = 0;
+      try {
+        for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+          if (ctrl.signal.aborted) {
+            updateJob(id, { status: 'done', phase: `Cancelled at ${processed}/${total}` });
+            await dbJobUpdate(id, { status: 'cancelled', processed });
+            return;
+          }
+
+          const chunk = ids.slice(i, i + CHUNK_SIZE);
+          const res = await fetchWithAuth(endpoint, {
+            method: 'POST',
+            body: JSON.stringify({ ids: chunk }),
+            signal: ctrl.signal,
+          });
+          if (!res || !res.ok) {
+            const errText = await (res ? res.text() : Promise.resolve('Unknown Network Error'));
+            throw new Error(`API Error: ${errText}`);
+          }
+          processed += chunk.length;
+          updateJob(id, { current: processed });
+          await dbJobUpdate(id, { processed, status: 'running' });
+        }
+        await dbJobUpdate(id, { status: 'done', processed: total });
+        updateJob(id, { status: 'done', current: total, phase: 'Complete' });
+      } catch (e) {
+        if (e?.name === 'AbortError') {
+          updateJob(id, { status: 'done', phase: `Cancelled at ${processed}/${total}` });
+          await dbJobUpdate(id, { status: 'cancelled', processed });
+        } else {
+          updateJob(id, { status: 'done', phase: 'Error' });
+        }
+      }
+    })();
   }, [updateJob]);
 
   return (
     <ImportContext.Provider value={{
-      jobs,
-      runImport,
-      requestAbort,
-      removeJob,
-      parseSession,
-      updateParseSession,
-      clearParseSession,
+      jobs, dbJobs, hasActiveJobs, runBulkImport, runDeleteOperation, removeJob, removeDbJob,
+      cancelJob, forceStopDbJob,
+      parseSession, updateParseSession, clearParseSession,
     }}>
       {children}
     </ImportContext.Provider>

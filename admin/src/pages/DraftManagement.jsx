@@ -1,12 +1,17 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Search, RefreshCw, Trash2, Edit2, Check, X, CloudUpload, FileText,
   ChevronDown, ChevronUp
 } from 'lucide-react';
 import { writeOperationLog } from '../utils/operationLog';
+import { fetchWithAuth } from '../utils/api';
+import { usePageData } from '../utils/usePageData';
+import { BannerView } from '../utils/BannerView';
+import { Cache } from '../utils/cache';
 import { API_BASE } from '../config/api';
-
-const DRAFT_TABLE = 'wp_fn_draft_numbers';
+import { useImport } from '../context/ImportContext';
+import { useToast } from '../components/Toast';
+import { useConfirm } from '../components/ConfirmModal';
 
 const styles = {
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' },
@@ -38,8 +43,9 @@ const styles = {
 };
 
 export default function DraftManagement() {
-  const [draftNumbers, setDraftNumbers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const toast = useToast();
+  const confirm = useConfirm();
+  const [draftNumbers, setDraftNumbers] = useState(() => Cache.get('fn_drafts') || []);
   const [searchTerm, setSearchTerm] = useState('');
   const [fileFilter, setFileFilter] = useState('');
   const [editingId, setEditingId] = useState(null);
@@ -48,29 +54,26 @@ export default function DraftManagement() {
   const [expandedSources, setExpandedSources] = useState([]);
   const [processing, setProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState('');
-  const [displayLimit, setDisplayLimit] = useState(500);
+  const [displayLimits, setDisplayLimits] = useState({});
 
-  const fetchDrafts = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/${DRAFT_TABLE}?limit=600000`);
-      if (res.ok) {
-        const data = await res.json();
-        setDraftNumbers(Array.isArray(data) ? data : []);
-      } else {
-        setDraftNumbers([]);
-      }
-    } catch (err) {
-      console.error('Error fetching drafts:', err);
-      setDraftNumbers([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const loadDrafts = useCallback(async () => {
+    const res = await fetchWithAuth(
+      `${API_BASE}/wp_fn_draft_numbers?limit=10000&order=number_id&dir=desc`
+    );
+    if (!res || !res.ok) return null;
+    const json = await res.json();
+    // Handle both old format (array) and new v4.0 format ({data, total})
+    if (Array.isArray(json)) return json;
+    if (json?.data && Array.isArray(json.data)) return json.data;
+    return null;
+  }, []);
+
+  const { data: draftsData, loading, showBanner, refresh: refreshDrafts }
+    = usePageData(loadDrafts, 'fn_drafts', 60000);
 
   useEffect(() => {
-    fetchDrafts();
-  }, []);
+    if (draftsData) setDraftNumbers(draftsData);
+  }, [draftsData]);
 
   const availableFiles = useMemo(() =>
     [...new Set(draftNumbers.map(n => n.inventory_source).filter(Boolean))].sort(),
@@ -116,41 +119,45 @@ export default function DraftManagement() {
 
   const handleSave = async () => {
     const { number_id, ...cleanForm } = editForm;
-    try {
-      const res = await fetch(`${API_BASE}/${DRAFT_TABLE}/${editingId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(cleanForm),
-      });
-      if (res.ok) {
-        setDraftNumbers(prev => prev.map(n => n.number_id === editingId ? { ...n, ...cleanForm } : n));
-        const admin = localStorage.getItem('adminUsername') || 'Admin';
-        await writeOperationLog({ fileName: 'Draft Edit', operationType: 'Single Update', operationData: `Draft row updated: ${editingId}`, totalRecords: 1, tableName: DRAFT_TABLE, recordId: editingId, recordIds: [editingId], adminName: admin, uploadedBy: admin });
-      } else {
-        alert('Failed to update draft.');
-      }
-    } catch (err) {
-      console.error(err);
-      alert('Error saving draft.');
-    }
+    const res = await fetchWithAuth(`${API_BASE}/wp_fn_draft_numbers/${editingId}`, {
+      method: 'PUT',
+      body: JSON.stringify(cleanForm),
+    });
+    if (!res || !res.ok) { toast.error('Update failed'); return; }
+
+    const updated = draftNumbers.map(n => n.number_id === editingId ? { ...n, ...cleanForm } : n);
+    setDraftNumbers(updated);
+    Cache.set('fn_drafts', updated);
+    
+    await writeOperationLog({
+      fileName: 'Draft Edit',
+      operationType: 'Single Update',
+      operationData: `Draft row updated: ${editingId}`,
+      totalRecords: 1,
+      tableName: 'wp_fn_draft_numbers',
+      adminName: localStorage.getItem('adminUsername') || 'Admin'
+    });
     setEditingId(null);
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Permanently delete this draft number?')) return;
-    try {
-      const res = await fetch(`${API_BASE}/${DRAFT_TABLE}/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        setDraftNumbers(prev => prev.filter(n => n.number_id !== id));
-        const admin = localStorage.getItem('adminUsername') || 'Admin';
-        await writeOperationLog({ fileName: 'Draft Delete', operationType: 'Single Delete', operationData: `Draft deleted: ${id}`, totalRecords: 1, tableName: DRAFT_TABLE, recordId: id, recordIds: [id], adminName: admin, uploadedBy: admin });
-      } else {
-        alert('Failed to delete draft.');
-      }
-    } catch (err) {
-      console.error(err);
-      alert('Error deleting draft.');
-    }
+    const ok = await confirm('Delete Draft', 'Permanently delete this draft number?', 'danger');
+    if (!ok) return;
+    const res = await fetchWithAuth(`${API_BASE}/wp_fn_draft_numbers/${id}`, { method: 'DELETE' });
+    if (!res || !res.ok) { toast.error('Delete failed'); return; }
+
+    const updated = draftNumbers.filter(n => n.number_id !== id);
+    setDraftNumbers(updated);
+    Cache.set('fn_drafts', updated);
+    
+    await writeOperationLog({
+      fileName: 'Draft Delete',
+      operationType: 'Single Delete',
+      operationData: `Draft deleted: ${id}`,
+      totalRecords: 1,
+      tableName: 'wp_fn_draft_numbers',
+      adminName: localStorage.getItem('adminUsername') || 'Admin'
+    });
   };
 
   const handleSelectAll = (group) => (e) => {
@@ -167,89 +174,84 @@ export default function DraftManagement() {
   };
 
   const pushSelectedToLive = async () => {
-    const toPush = draftNumbers.filter(n => selectedIds.includes(n.number_id));
-    if (toPush.length === 0) return;
-    if (!window.confirm(`Push ${toPush.length} numbers to live store?`)) return;
+    const ids = draftNumbers
+      .filter(n => selectedIds.includes(n.number_id))
+      .map(n => n.number_id);
+    if (!ids.length) return;
+    const ok = await confirm('Push to Live', `Push ${ids.length} numbers to live store?`, 'success');
+    if (!ok) return;
 
     setProcessing(true);
-    const admin = localStorage.getItem('adminUsername') || 'Admin';
-    let success = 0;
-    const CHUNK = 25;
+    setProcessingStatus('Restoring to live...');
 
-    for (let i = 0; i < toPush.length; i += CHUNK) {
-      const chunk = toPush.slice(i, i + CHUNK);
-      setProcessingStatus(`Restoring ${i + 1}–${Math.min(i + CHUNK, toPush.length)} of ${toPush.length}…`);
-      const results = await Promise.all(
-        chunk.map(async (numData) => {
-          try {
-            const { number_id, ...payload } = numData;
-            payload.visibility_status = payload.visibility_status || '1';
-            payload.number_status = payload.number_status || 'available';
-            const insertRes = await fetch(`${API_BASE}/wp_fn_numbers`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
-            });
-            if (!insertRes.ok) return 0;
-            const delRes = await fetch(`${API_BASE}/${DRAFT_TABLE}/${number_id}`, { method: 'DELETE' });
-            if (!delRes.ok) return 0;
-            return 1;
-          } catch {
-            return 0;
-          }
-        })
-      );
-      success += results.reduce((a, b) => a + b, 0);
-      if (i + CHUNK < toPush.length) await new Promise(r => setTimeout(r, 100));
-    }
+    const res = await fetchWithAuth(
+      `${API_BASE}/wp_fn_draft_numbers/bulk-restore`,
+      { method: 'POST', body: JSON.stringify({ ids }) }
+    );
+    const data  = res && res.ok ? await res.json() : null;
+    const moved = data?.moved ?? 0;
 
-    await writeOperationLog({ fileName: 'Draft Push', operationType: 'Draft Push to Live', operationData: `Restored ${success} numbers`, totalRecords: toPush.length, tableName: DRAFT_TABLE, recordIds: toPush.map(n => n.number_id), adminName: admin, uploadedBy: admin });
-    setDraftNumbers(prev => prev.filter(n => !selectedIds.includes(n.number_id)));
+    await writeOperationLog({
+      fileName: 'Draft Restore',
+      operationType: 'Draft Push to Live',
+      operationData: `Restored ${moved} numbers to live`,
+      totalRecords: moved,
+      tableName: 'wp_fn_draft_numbers',
+      adminName: localStorage.getItem('adminUsername') || 'Admin'
+    });
+
+    const remaining = draftNumbers.filter(n => !ids.includes(n.number_id));
+    setDraftNumbers(remaining);
+    Cache.set('fn_drafts', remaining);
     setSelectedIds([]);
     setProcessing(false);
-    setProcessingStatus('');
-    alert(`✅ ${success} numbers pushed to live store.`);
+    setProcessingStatus(`✅ ${moved} numbers restored`);
+    setTimeout(() => setProcessingStatus(''), 3000);
   };
 
   const deleteSelected = async () => {
-    const toDel = selectedIds;
-    if (toDel.length === 0) return;
-    if (!window.confirm(`⚠ Permanently delete ${toDel.length} draft numbers? CANNOT BE UNDONE.`)) return;
+    const ids = [...selectedIds];
+    if (!ids.length) return;
+    const ok = await confirm('Delete Permanently', `Permanently delete ${ids.length} draft numbers? CANNOT BE UNDONE.`, 'danger');
+    if (!ok) return;
 
     setProcessing(true);
-    const admin = localStorage.getItem('adminUsername') || 'Admin';
-    let deleted = 0;
-    const CHUNK = 25;
+    setProcessingStatus('Deleting permanently...');
 
-    for (let i = 0; i < toDel.length; i += CHUNK) {
-      const chunk = toDel.slice(i, i + CHUNK);
-      setProcessingStatus(`Deleting ${i + 1}–${Math.min(i + CHUNK, toDel.length)} of ${toDel.length}…`);
-      const results = await Promise.all(
-        chunk.map(id =>
-          fetch(`${API_BASE}/${DRAFT_TABLE}/${id}`, { method: 'DELETE' })
-            .then(r => r.ok ? 1 : 0)
-            .catch(() => 0)
-        )
-      );
-      deleted += results.reduce((a, b) => a + b, 0);
-    }
+    const res = await fetchWithAuth(
+      `${API_BASE}/wp_fn_draft_numbers/bulk-delete`,
+      { method: 'POST', body: JSON.stringify({ ids }) }
+    );
+    const data    = res && res.ok ? await res.json() : null;
+    const deleted = data?.deleted ?? data?.processed ?? 0;
 
-    await writeOperationLog({ fileName: 'Draft Bulk Delete', operationType: 'Draft Bulk Delete', operationData: `Deleted ${deleted} drafts`, totalRecords: toDel.length, tableName: DRAFT_TABLE, recordIds: toDel, adminName: admin, uploadedBy: admin });
-    setDraftNumbers(prev => prev.filter(n => !selectedIds.includes(n.number_id)));
+    await writeOperationLog({
+      fileName: 'Draft Bulk Delete',
+      operationType: 'Draft Bulk Delete',
+      operationData: `Deleted ${deleted} drafts permanently`,
+      totalRecords: deleted,
+      tableName: 'wp_fn_draft_numbers',
+      adminName: localStorage.getItem('adminUsername') || 'Admin'
+    });
+
+    const remaining = draftNumbers.filter(n => !ids.includes(n.number_id));
+    setDraftNumbers(remaining);
+    Cache.set('fn_drafts', remaining);
     setSelectedIds([]);
     setProcessing(false);
-    setProcessingStatus('');
-    alert(`🗑 ${deleted} draft numbers permanently deleted.`);
+    setProcessingStatus(`✅ ${deleted} drafts deleted`);
+    setTimeout(() => setProcessingStatus(''), 3000);
   };
-
-  const totalCount = filteredDrafts.length;
 
   return (
     <div>
       <style>{`@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}`}</style>
 
       <div style={styles.header}>
-        <h2 style={styles.title}>📦 Draft Management</h2>
+        <div style={{display:'flex', flexDirection:'column'}}>
+          <h2 style={styles.title}>📦 Draft Management</h2>
+          <BannerView show={showBanner} onRetry={refreshDrafts} />
+        </div>
         <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
           {availableFiles.length > 0 && (
             <select value={fileFilter} onChange={(e) => setFileFilter(e.target.value)} style={styles.fileSelect}>
@@ -261,7 +263,7 @@ export default function DraftManagement() {
             <Search size={20} style={styles.searchIcon} />
             <input type="text" placeholder="Search mobile number..." style={styles.searchInput} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
           </div>
-          <button onClick={fetchDrafts} disabled={loading || processing} style={styles.refreshBtn}>
+          <button onClick={refreshDrafts} disabled={loading || processing} style={styles.refreshBtn}>
             <RefreshCw size={15} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} /> Refresh
           </button>
         </div>
@@ -270,7 +272,7 @@ export default function DraftManagement() {
       <div style={styles.dashboardGrid}>
         <div style={styles.kpiCard}>
           <p style={styles.kpiLabel}>Total Drafts</p>
-          <h3 style={styles.kpiValue}>{totalCount}</h3>
+          <h3 style={styles.kpiValue}>{filteredDrafts.length}</h3>
         </div>
         <div style={styles.kpiCard}>
           <p style={styles.kpiLabel}>Source Files</p>
@@ -283,8 +285,8 @@ export default function DraftManagement() {
       </div>
 
       {processingStatus && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#e0f2fe', padding: '10px 16px', borderRadius: '8px', marginBottom: '16px', fontWeight: 700, color: '#0369a1' }}>
-          <RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} /> {processingStatus}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: processingStatus.startsWith('✅') ? '#dcfce7' : '#e0f2fe', padding: '10px 16px', borderRadius: '8px', marginBottom: '16px', fontWeight: 700, color: processingStatus.startsWith('✅') ? '#16a34a' : '#0369a1' }}>
+          {!processingStatus.startsWith('✅') && <RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} />} {processingStatus}
         </div>
       )}
 
@@ -302,7 +304,7 @@ export default function DraftManagement() {
         </div>
       )}
 
-      {loading ? (
+      {loading && draftNumbers.length === 0 ? (
         <div style={{ ...styles.tableCard, textAlign: 'center', padding: '60px' }}>
           <RefreshCw size={32} style={{ animation: 'spin 1s linear infinite', color: 'var(--neon-green-dark)', margin: '0 auto 12px', display: 'block' }} />
           <p>Loading draft numbers...</p>
@@ -316,7 +318,8 @@ export default function DraftManagement() {
       ) : (
         groupsBySource.map(group => {
           const isExpanded = expandedSources.includes(group.src);
-          const groupDisplay = group.nums.slice(0, displayLimit);
+          const groupLimit = displayLimits[group.src] || 500;
+          const groupDisplay = group.nums.slice(0, groupLimit);
           const allInGroupSelected = groupDisplay.length > 0 && groupDisplay.every(n => selectedIds.includes(n.number_id));
 
           return (
@@ -417,10 +420,10 @@ export default function DraftManagement() {
                       </tbody>
                     </table>
                   </div>
-                  {group.nums.length > displayLimit && (
+                  {group.nums.length > groupLimit && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderTop: '1px solid var(--border-color)' }}>
-                      <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Showing {displayLimit} of {group.nums.length}</span>
-                      <button onClick={() => setDisplayLimit(p => p + 500)} style={{ padding: '8px 16px', background: 'white', border: '1px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}>Load Next 500</button>
+                      <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Showing {groupLimit} of {group.nums.length}</span>
+                      <button onClick={() => setDisplayLimits(p => ({...p, [group.src]: (p[group.src] || 500) + 500}))} style={{ padding: '8px 16px', background: 'white', border: '1px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}>Load Next 500</button>
                     </div>
                   )}
                 </>
