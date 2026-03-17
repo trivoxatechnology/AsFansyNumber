@@ -12,11 +12,15 @@ const SAFE_FALLBACK = {
   headers: new Headers(),
 };
 
+/**
+ * Enhanced fetch with auth, timeouts, and automatic retry for 5xx errors.
+ */
 export const fetchWithAuth = async (url, options = {}) => {
-  const token = localStorage.getItem('adminToken');
+  const token = localStorage.getItem('ag_admin_token');
   if (!token) {
-    // No token = definitely not authenticated, redirect
-    window.location.href = '/login';
+    if (window.location.pathname !== '/admin/login' && window.location.pathname !== '/login') {
+      window.location.replace('/admin/login');
+    }
     return SAFE_FALLBACK;
   }
 
@@ -40,9 +44,11 @@ export const fetchWithAuth = async (url, options = {}) => {
       clearTimeout(timer);
 
       if (res.status === 401) {
-        localStorage.removeItem('adminToken');
-        localStorage.removeItem('adminUsername');
-        window.location.href = '/login';
+        localStorage.removeItem('ag_admin_token');
+        localStorage.removeItem('ag_admin_username');
+        if (window.location.pathname !== '/admin/login' && window.location.pathname !== '/login') {
+          window.location.replace('/admin/login');
+        }
         return SAFE_FALLBACK;
       }
 
@@ -68,7 +74,6 @@ export const fetchWithAuth = async (url, options = {}) => {
 
 /**
  * Safely extract JSON from a response. Always returns a value, never throws.
- * Handles both old API format (array) and new v4.0 format ({data, total}).
  */
 export const safeJson = async (res) => {
   if (!res || !res.ok) return null;

@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { fetchWithAuth } from '../utils/api';
 import { API_BASE } from '../config/api';
-import { classifyNumber, CATEGORIES, PATTERN_TYPES } from '../utils/PatternEngine';
+import { classifyNumber as detectPattern, CATEGORIES, PATTERN_TYPES } from '../utils/PatternEngine';
 import { useImport } from '../context/ImportContext';
 import { useToast } from '../components/Toast';
 
@@ -51,13 +51,6 @@ function validateRow(row, idx, existingSet) {
     mobile_number: mobile || '',
     base_price: row.base_price||'',
     offer_price: row.offer_price||'',
-    offer_start_date: row.offer_start_date||'',
-    offer_end_date: row.offer_end_date||'',
-    primary_incharge_name: row.primary_incharge_name||'',
-    primary_incharge_phone: String(row.primary_incharge_phone||''),
-    secondary_incharge_name: row.secondary_incharge_name||'',
-    secondary_incharge_phone: String(row.secondary_incharge_phone||''),
-    whatsapp_group_name: row.whatsapp_group_name||'',
     number_status: status||'available',
     remarks: row.remarks||'',
     pattern_type: row.pattern_type || pattern.pattern_type,
@@ -171,6 +164,7 @@ export default function ImportWorkspace() {
           let safeKey = key.trim().toLowerCase().replace(/[\s-.]+/g, '_');
           if (['mobile_no','phone','contact','number'].includes(safeKey)) safeKey = 'mobile_number';
           if (['price','selling_price'].includes(safeKey)) safeKey = 'base_price';
+          if (['inventory','source','file'].includes(safeKey)) safeKey = 'inventory_source';
           norm[safeKey] = row[key];
         }
         return norm;
@@ -283,7 +277,9 @@ export default function ImportWorkspace() {
     clearParseSession();
   };
 
-  const COLS = ['mobile_number','pattern_type','category','base_price','offer_price','number_status','remarks'];
+  const COLS = [
+    'mobile_number','base_price','offer_price','number_status','category','pattern_type','remarks'
+  ];
 
   return (
     <div>
@@ -380,7 +376,13 @@ export default function ImportWorkspace() {
           <div style={s.gridWrap}>
             <table style={s.table}>
               <thead><tr><th>Mobile</th><th>Pattern</th><th>Category</th></tr></thead>
-              <tbody>{rows.filter(r=>r._status==='valid').slice(0,displayLimit3).map((r,i)=>(<tr key={i}><td>{r.mobile_number}</td><td>{r.pattern_type}</td><td>{r.category}</td></tr>))}</tbody>
+              <tbody>{rows.filter(r=>r._status==='valid').slice(0,displayLimit3).map((r,i)=>(
+                <tr key={i}>
+                  <td>{r.mobile_number}</td>
+                  <td>{r.pattern_type}</td>
+                  <td>{r.category}</td>
+                </tr>
+              ))}</tbody>
             </table>
           </div>
         </div>

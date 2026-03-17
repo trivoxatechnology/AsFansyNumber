@@ -3,7 +3,7 @@ import { useDropzone } from 'react-dropzone';
 import * as XLSX from 'xlsx';
 import { CloudUpload, Download, RefreshCw, Check, CircleCheck } from 'lucide-react';
 import { API_BASE } from '../../config/api';
-import { classifyNumber } from '../../utils/PatternEngine';
+import { classifyNumber as detectPattern, CATEGORIES, PATTERN_TYPES } from '../../utils/PatternEngine';
 import { useImport } from '../../context/ImportContext';
 import { useToast } from '../../components/Toast';
 import { fetchWithAuth } from '../../utils/api';
