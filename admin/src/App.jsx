@@ -7,7 +7,9 @@ import DashboardLayout from './components/DashboardLayout';
 import Inventory from './pages/Inventory';
 import UploadManager from './pages/UploadManager';
 import DraftManager from './pages/DraftManager';
+import LogHistory from './pages/LogHistory';
 import { ImportProvider } from './context/ImportContext';
+import { OperatorProvider } from './components/OperatorPrompt';
 
 // Protected Route Wrapper — validates token format AND session expiry
 const ProtectedRoute = ({ children }) => {
@@ -21,7 +23,9 @@ const DashboardWrapper = () => {
   return (
     <ProtectedRoute>
       <ImportProvider>
-        <DashboardLayout />
+        <OperatorProvider>
+          <DashboardLayout />
+        </OperatorProvider>
       </ImportProvider>
     </ProtectedRoute>
   );
@@ -45,6 +49,7 @@ export default function App() {
               <Route path="inventory" element={<Inventory />} />
               <Route path="upload" element={<UploadManager />} />
               <Route path="drafts" element={<DraftManager />} />
+              <Route path="logs" element={<LogHistory />} />
             </Route>
           </Routes>
         </BrowserRouter>

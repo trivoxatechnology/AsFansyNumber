@@ -56,3 +56,17 @@ export const putWithAuth = async (url, data, options = {}) => {
 export const deleteWithAuth = async (url, options = {}) => {
   return fetchWithAuth(url, { method: 'DELETE', ...options });
 };
+
+/**
+ * Safely parse JSON from a fetch response.
+ * Returns null if response is null, empty, or not JSON.
+ */
+export const safeJson = async (response) => {
+  if (!response || !response.ok) return null;
+  try {
+    return await response.json();
+  } catch (e) {
+    console.error('safeJson failed to parse:', e);
+    return null;
+  }
+};

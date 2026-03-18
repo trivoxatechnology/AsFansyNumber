@@ -1,9 +1,52 @@
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { 
-  List, UploadCloud, Archive, LogOut 
+  List, UploadCloud, Archive, LogOut, Loader2, CheckCircle, AlertCircle, X, Clock
 } from 'lucide-react';
 import { logout } from '../utils/authService';
+import { useImport } from '../context/ImportContext';
 import ErrorBoundary from '../utils/ErrorBoundary';
+
+function ImportProgressBar() {
+  const { jobs, removeJob } = useImport();
+  const activeJobs = jobs.filter(j => j.status === 'running' || j.status === 'done');
+  if (activeJobs.length === 0) return null;
+
+  return (
+    <div style={{ padding: '0 24px 8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      {activeJobs.map(job => {
+        const pct = job.total > 0 ? Math.round((job.current / job.total) * 100) : 0;
+        const isRunning = job.status === 'running';
+        const isError = job.phase?.startsWith('Error');
+        const isDone = job.status === 'done' && !isError;
+        return (
+          <div key={job.id} style={{
+            display: 'flex', alignItems: 'center', gap: '10px',
+            padding: '8px 14px', borderRadius: '8px', fontSize: '0.82rem', fontWeight: 600,
+            background: isError ? '#fef2f2' : isDone ? '#f0fdf4' : '#eff6ff',
+            border: `1px solid ${isError ? '#fecaca' : isDone ? '#bbf7d0' : '#bfdbfe'}`,
+          }}>
+            {isRunning && <Loader2 size={16} style={{ animation: 'spin 1s linear infinite', color: '#3b82f6', flexShrink: 0 }} />}
+            {isDone && <CheckCircle size={16} style={{ color: '#16a34a', flexShrink: 0 }} />}
+            {isError && <AlertCircle size={16} style={{ color: '#dc2626', flexShrink: 0 }} />}
+            <span style={{ flex: 1, color: isError ? '#dc2626' : isDone ? '#16a34a' : '#1d4ed8' }}>
+              {job.label}: {job.phase || `${pct}%`}
+            </span>
+            {isRunning && (
+              <div style={{ width: '120px', height: '6px', background: '#dbeafe', borderRadius: '3px', overflow: 'hidden' }}>
+                <div style={{ width: `${pct}%`, height: '100%', background: '#3b82f6', borderRadius: '3px', transition: 'width 0.3s' }} />
+              </div>
+            )}
+            {!isRunning && (
+              <button onClick={() => removeJob(job.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px' }}>
+                <X size={14} style={{ color: '#94a3b8' }} />
+              </button>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function DashboardLayout() {
   const navigate = useNavigate();
@@ -20,6 +63,7 @@ export default function DashboardLayout() {
       { path: '/inventory', icon: <List size={18} />, label: 'Inventory Manager' },
       { path: '/upload', icon: <UploadCloud size={18} />, label: 'Upload Manager' },
       { path: '/drafts', icon: <Archive size={18} />, label: 'Draft Manager' },
+      { path: '/logs', icon: <Clock size={18} />, label: 'Log History' },
     ]},
   ];
 
@@ -115,6 +159,8 @@ export default function DashboardLayout() {
             </div>
           </div>
         </header>
+
+        <ImportProgressBar />
 
         <div className="container-fluid" style={{ padding: '24px' }}>
           <ErrorBoundary>

@@ -1,9 +1,9 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import * as XLSX from 'xlsx';
 import {
   CloudUpload, ChevronDown, ChevronUp,
-  Download, RefreshCw, Check, X, Info, Trash2, FileText
+  Download, RefreshCw, Check, X, Info, Trash2, FileText, Archive
 } from 'lucide-react';
 import { fetchWithAuth } from '../utils/api';
 import { API_BASE } from '../config/api';
@@ -23,47 +23,77 @@ function getOperation(row, existingSet) {
 function validateRow(row, idx, existingSet) {
   const errors = [];
   const mobile = String(row.mobile_number || '').replace(/\D/g, '');
-  const status = String(row.number_status || 'available').toLowerCase().trim();
-  const isDelete = status === 'deleted';
+  
+  if (!mobile) {
+    errors.push({ field: 'mobile_number', msg: 'Mobile number is required' });
+  } else if (mobile.length !== 10) {
+    errors.push({ field: 'mobile_number', msg: 'Must be exactly 10 digits' });
+  } else if (!/^[6-9]/.test(mobile)) {
+    errors.push({ field: 'mobile_number', msg: 'Must start with 6, 7, 8, or 9' });
+  }
 
-  if (!mobile) errors.push({ field: 'mobile_number', msg: 'Mobile number is required' });
-  else if (mobile.length !== 10) errors.push({ field: 'mobile_number', msg: 'Must be exactly 10 digits' });
+  const bp = parseFloat(row.base_price || 0);
+  if (!row.base_price) {
+    errors.push({ field: 'base_price', msg: 'Base price is required' });
+  } else if (isNaN(bp) || bp <= 0) {
+    errors.push({ field: 'base_price', msg: 'Must be a positive number' });
+  }
 
-  if (!isDelete) {
-    const bp = parseFloat(row.base_price || 0);
-    if (!row.base_price) errors.push({ field: 'base_price', msg: 'Base price is required' });
-    else if (isNaN(bp) || bp <= 0) errors.push({ field: 'base_price', msg: 'Must be a positive number' });
-    const op = parseFloat(row.offer_price || 0);
-    if (op && op > bp) errors.push({ field: 'offer_price', msg: 'Offer price cannot exceed base price' });
+  const op = parseFloat(row.offer_price || 0);
+  if (row.offer_price && op > bp) {
+    errors.push({ field: 'offer_price', msg: 'Offer price cannot exceed base price' });
   }
 
   const inDbDupe = mobile && existingSet.has(mobile);
-  const operation = getOperation(row, existingSet);
-  const pattern = classifyNumber(mobile);
+  const pattern = classifyNumber(mobile || '0000000000');
 
   let _status = 'valid';
   if (errors.length > 0) _status = 'error';
-  else if (!mobile || (!isDelete && !row.base_price)) _status = 'missing';
+  else if (inDbDupe) _status = 'conflict';
+
+  const _operation = getOperation(row, existingSet);
+
+  // Helper: use row value if present (including 0), else use fallback
+  const v = (val, fb) => (val !== undefined && val !== null && val !== '') ? val : fb;
 
   return {
-    _rowId: idx + 2, _status, _errors: errors, _isDbDupe: inDbDupe,
-    _operation: operation,
+    _rowId: idx + 2,
+    _status,
+    _operation,
+    _errors: errors,
+    _isDbDupe: inDbDupe,
+    
+    // Type A & B (User Input)
     mobile_number: mobile || '',
-    base_price: row.base_price || '',
-    offer_price: row.offer_price || '',
-    number_status: status || 'available',
-    remarks: row.remarks || '',
-    pattern_type: row.pattern_type || pattern.pattern_type,
-    category: row.category || pattern.category,
-    prefix: mobile ? mobile.slice(0, 5) : '',
-    suffix: mobile ? mobile.slice(5) : '',
-    digit_sum: mobile ? mobile.split('').reduce((s, c) => s + parseInt(c), 0) : 0,
-    repeat_count: (() => {
-      let maxRun = 1, run = 1;
-      if (!mobile) return 0;
-      for (let i = 1; i < mobile.length; i++) { if (mobile[i] === mobile[i - 1]) run++; else run = 1; maxRun = Math.max(maxRun, run); }
-      return maxRun;
-    })(),
+    number_type: v(row.number_type, ''),
+    category: v(row.category, ''),
+    number_category: v(row.number_category, pattern.number_category),
+    base_price: v(row.base_price, ''),
+    offer_price: v(row.offer_price, ''),
+    offer_start_date: v(row.offer_start_date, ''),
+    offer_end_date: v(row.offer_end_date, ''),
+    platform_commission: v(row.platform_commission, '0'),
+    number_status: v(row.number_status, 'available'),
+    visibility_status: row.visibility_status !== undefined ? row.visibility_status : '1',
+    inventory_source: v(row.inventory_source, ''),
+    dealer_id: v(row.dealer_id, ''),
+    couple_number_id: v(row.couple_number_id, ''),
+    group_number_id: v(row.group_number_id, ''),
+    remarks: v(row.remarks, ''),
+    draft_reason: v(row.draft_reason, ''),
+
+    // Type C (Auto-Generated) — explicit checks so 0 values are preserved
+    pattern_name: v(row.pattern_name, pattern.pattern_name),
+    pattern_type: v(row.pattern_type, pattern.pattern_type),
+    prefix: v(row.prefix, pattern.prefix),
+    suffix: v(row.suffix, pattern.suffix),
+    digit_sum: v(row.digit_sum, pattern.digit_sum),
+    repeat_count: v(row.repeat_count, pattern.repeat_count),
+    vip_score: v(row.vip_score, pattern.vip_score),
+    auto_detected: v(row.auto_detected, 1),
+    
+    // Manual Overrides tracking
+    _overrides: {}
   };
 }
 
@@ -145,12 +175,23 @@ export default function ImportWorkspace() {
   const [sortDir, setSortDir] = useState('asc');
   const [bulkField, setBulkField] = useState('');
   const [bulkValue, setBulkValue] = useState('');
+  const [unmatchedCols, setUnmatchedCols] = useState([]);
+
+  // Known columns our system understands
+  const KNOWN_COLS = new Set([
+    'mobile_number', 'number_type', 'category', 'base_price', 'offer_price',
+    'offer_start_date', 'offer_end_date', 'platform_commission', 'number_status',
+    'visibility_status', 'inventory_source', 'dealer_id', 'remarks', 'draft_reason',
+    'pattern_name', 'pattern_type', 'prefix', 'suffix', 'digit_sum', 'repeat_count',
+    'vip_score', 'auto_detected', 'couple_number_id', 'group_number_id'
+  ]);
 
   const onDrop = useCallback(async (files) => {
     const file = files[0]; if (!file) return;
     setFileName(file.name);
     setIsParsing(true);
     setParseProgress('Reading file...');
+    setUnmatchedCols([]);
     try {
       const buf = await file.arrayBuffer();
       const data = new Uint8Array(buf);
@@ -160,46 +201,77 @@ export default function ImportWorkspace() {
       const ws = wb.Sheets[wb.SheetNames[0]];
       const rawJson = XLSX.utils.sheet_to_json(ws, { defval: '' });
 
+      // Column alias mapping — normalise any column header to our standard names
+      const ALIAS_MAP = {
+        'mobile_no': 'mobile_number', 'phone': 'mobile_number', 'contact': 'mobile_number',
+        'number': 'mobile_number', 'mob': 'mobile_number', 'mobile': 'mobile_number',
+        'phone_number': 'mobile_number', 'cell': 'mobile_number', 'contact_number': 'mobile_number',
+        'price': 'base_price', 'selling_price': 'base_price', 'mrp': 'base_price',
+        'amount': 'base_price', 'cost': 'base_price', 'rate': 'base_price',
+        'offer': 'offer_price', 'discount_price': 'offer_price', 'sale_price': 'offer_price',
+        'number_category': 'category', 'cat': 'category',
+        'inventory': 'inventory_source', 'source': 'inventory_source', 'file': 'inventory_source',
+        'couple_id': 'couple_number_id', 'couple_no': 'couple_number_id', 'couple': 'couple_number_id',
+        'group_id': 'group_number_id', 'group_no': 'group_number_id', 'group': 'group_number_id',
+        'dealer': 'dealer_id', 'status': 'number_status', 'type': 'number_type',
+        'remark': 'remarks', 'note': 'remarks', 'notes': 'remarks',
+        'commission': 'platform_commission', 'visibility': 'visibility_status',
+        'pattern': 'pattern_type', 'score': 'vip_score',
+      };
+
+      const _unmatched = new Set();
       const json = rawJson.map(row => {
         const norm = {};
         for (let key in row) {
           let safeKey = key.trim().toLowerCase().replace(/[\s-.]+/g, '_');
-          if (['mobile_no', 'phone', 'contact', 'number'].includes(safeKey)) safeKey = 'mobile_number';
-          if (['price', 'selling_price'].includes(safeKey)) safeKey = 'base_price';
-          if (['inventory', 'source', 'file'].includes(safeKey)) safeKey = 'inventory_source';
+          // Try alias mapping first
+          if (ALIAS_MAP[safeKey]) safeKey = ALIAS_MAP[safeKey];
+          // Track unmatched columns (unknown to our system)
+          if (!KNOWN_COLS.has(safeKey)) _unmatched.add(key.trim());
           norm[safeKey] = row[key];
         }
         return norm;
       });
 
-      setParseProgress('Checking database for updates...');
-      const validRows = json.filter(r => r.mobile_number || r.base_price);
-      const res = await fetchWithAuth(`${API_BASE}/wp_fn_numbers/bulk-lookup`, {
-        method: 'POST',
-        body: JSON.stringify({ mobile_numbers: validRows.map(r => String(r.mobile_number)) })
-      });
+      if (_unmatched.size > 0) setUnmatchedCols([..._unmatched]);
+      console.log('[Extract] Raw Rows:', rawJson.length, rawJson.slice(0, 3));
+      console.log('[Extract] Mapped Rows:', json.length, json.slice(0, 3));
+      if (_unmatched.size > 0) console.warn('[Extract] Unmatched columns:', [..._unmatched]);
 
+      setParseProgress('Checking database for updates...');
+      // Accept rows that have at least a mobile_number OR base_price
+      const validRows = json.filter(r => r.mobile_number || r.base_price);
+      
       let existingSet = new Set();
-      if (res && res.ok) {
-        const d = await res.json();
-        if (d.matched) d.matched.forEach(r => existingSet.add(String(r.mobile_number)));
+      try {
+        const res = await fetchWithAuth(`${API_BASE}/wp_fn_numbers/bulk-lookup`, {
+          method: 'POST',
+          body: JSON.stringify({ mobile_numbers: validRows.map(r => String(r.mobile_number || '')) })
+        });
+        if (res && res.ok) {
+          const d = await res.json();
+          if (d.matched) d.matched.forEach(r => existingSet.add(String(r.mobile_number)));
+        }
+      } catch (lookupErr) {
+        console.warn('[Extract] Bulk lookup failed (importing as inserts):', lookupErr.message);
       }
 
       setParseProgress('Validating rows...');
       const parsed = validRows.map((r, i) => validateRow(r, i, existingSet));
-      setRows(parsed); setStep(2);
-    } catch (e) { toast.error('Parse failed: ' + e.message); }
+      setRows(parsed); 
+      setStep(2); // Go to Step 2: User Data Review
+    } catch (e) { 
+      const isNetworkError = e.message === 'Failed to fetch' || e.name === 'TypeError';
+      const msg = isNetworkError ? 'Network Error: Could not connect to API (Check VPN/CORS)' : e.message;
+      toast.error('Parse failed: ' + msg); 
+      console.error(e);
+    }
     finally { setIsParsing(false); setParseProgress(''); }
   }, []);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     multiple: false,
-    accept: {
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
-      'application/vnd.ms-excel': ['.xls'],
-      'text/csv': ['.csv']
-    }
   });
 
   const updateCell = (ri, field, value) => {
@@ -219,11 +291,8 @@ export default function ImportWorkspace() {
   const stats = {
     total: rows.length,
     valid: rows.filter(r => r._status === 'valid').length,
-    missing: rows.filter(r => r._status === 'missing').length,
-    error: rows.filter(r => r._status === 'error').length,
-    inserts: rows.filter(r => r._status === 'valid' && r._operation === 'insert').length,
-    updates: rows.filter(r => r._status === 'valid' && r._operation === 'update').length,
-    deletes: rows.filter(r => r._status === 'valid' && r._operation === 'delete').length,
+    conflicts: rows.filter(r => r._status === 'conflict').length,
+    errors: rows.filter(r => r._status === 'error').length,
   };
 
   let display = [...rows];
@@ -248,10 +317,55 @@ export default function ImportWorkspace() {
   };
 
   const downloadTemplate = () => {
-    const cols = { mobile_number: '', base_price: '', number_status: 'available', remarks: '' };
-    const ws = XLSX.utils.json_to_sheet([cols]);
-    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Template');
-    XLSX.writeFile(wb, 'Template.xlsx');
+    const headers = [
+      'mobile_number', 'number_type', 'number_category', 'base_price', 'offer_price',
+      'offer_start_date', 'offer_end_date', 'platform_commission', 'number_status',
+      'visibility_status', 'inventory_source', 'dealer_id', 'remarks', 'draft_reason',
+      'pattern_name', 'pattern_type', 'prefix', 'suffix', 'digit_sum', 'repeat_count',
+      'vip_score', 'auto_detected'
+    ];
+
+    const hints = [
+      'REQUIRED — 10 digits, starts 6-9', 'Optional — 1=Prepaid 2=Postpaid 3=Special',
+      'Auto — 1=Diamond 2=Platinum 3=Gold 4=Silver 5=Normal', 'REQUIRED — selling price > 0',
+      'Optional — discount price < base', 'Optional — YYYY-MM-DD HH:MM:SS',
+      'Optional — must be after start', 'Optional — commission in rupees',
+      'Optional — defaults to available', 'Optional — 1=Show 0=Hide',
+      'Optional — e.g. Direct, Agent', 'REQUIRED — dealer ID number',
+      'Optional — any notes', 'Optional — draft only',
+      'Auto if blank', 'Auto-detected if blank',
+      'Auto — first 4 digits', 'Auto — last 4 digits',
+      'Auto — sum of digits', 'Auto — most repeated digit count',
+      'Auto — quality 0-100', 'Auto — 1 if any field auto-generated'
+    ];
+
+    const wb = XLSX.utils.book_new();
+
+    // Sheet 1: fn_numbers Import
+    const ws = XLSX.utils.aoa_to_sheet([headers, hints]);
+    const wchs = [22, 16, 20, 16, 16, 24, 24, 22, 17, 18, 22, 14, 32, 32, 24, 20, 13, 13, 14, 16, 14, 16];
+    ws['!cols'] = wchs.map(w => ({ wch: w }));
+    XLSX.utils.book_append_sheet(wb, ws, 'fn_numbers Import');
+
+    // Sheet 2: Category & Pattern Guide
+    const guideData = [
+      ['Pattern Type', 'Category Name', 'Category ID', 'Description'],
+      ['Mirror',      'Diamond',  1, 'Rarest — first half mirrors reverse of second half'],
+      ['Palindrome',  'Diamond',  1, 'Reads same forwards and backwards'],
+      ['Ladder Up',   'Platinum', 2, 'Every digit 1 more than previous'],
+      ['Ladder Down', 'Platinum', 2, 'Every digit 1 less than previous'],
+      ['Repeating',   'Platinum', 2, '3+ consecutive same digits'],
+      ['Double Pair', 'Gold',     3, 'Two or more pairs of repeated digits'],
+      ['Triple',      'Gold',     3, 'Three same digits in sequence'],
+      ['Sequential',  'Silver',   4, 'Run of 4+ ascending or descending digits'],
+      ['Normal',      'Normal',   5, 'No significant pattern detected'],
+    ];
+    const ws2 = XLSX.utils.aoa_to_sheet(guideData);
+    ws2['!cols'] = [{ wch: 18 }, { wch: 16 }, { wch: 14 }, { wch: 50 }];
+    XLSX.utils.book_append_sheet(wb, ws2, 'Category & Pattern Guide');
+
+    XLSX.writeFile(wb, 'fansy_import_template.xlsx');
+    toast.success('Template generated successfully');
   };
 
   const handleImport = () => {
@@ -268,24 +382,50 @@ export default function ImportWorkspace() {
       });
       return payload;
     };
+    
+    // Validate that we have some rows to import
+    const validCount = rows.filter(r => r._status === 'valid' || r._status === 'conflict').length;
+    if (validCount === 0) {
+      toast.error('No valid rows or conflicts to import. Please check for errors in Step 1.');
+      return;
+    }
+
     runBulkImport({
-      rows,
+      rows: rows.filter(r => r._status === 'valid' || r._status === 'conflict'),
       fileName,
       importDestination: dest,
       operatorName: operatorName.trim() || localStorage.getItem('ag_admin_username') || 'Admin',
       cleanRow,
     });
     setShowConfirmModal(false);
-    clearParseSession();
+    // Don't clear parse session — runBulkImport is async fire-and-forget.
+    // Clearing here wipes rows before they finish sending.
+    // ImportContext will handle state via job tracking.
+    setStep(1);
   };
 
-  const COLS = [
-    'mobile_number', 'base_price', 'offer_price', 'number_status', 'category', 'pattern_type', 'remarks'
+  const COLS_STEP1 = [
+    'mobile_number', 'number_type', 'category', 'base_price', 'offer_price',
+    'offer_start_date', 'offer_end_date', 'platform_commission', 'number_status',
+    'visibility_status', 'inventory_source', 'dealer_id', 'couple_number_id',
+    'group_number_id', 'remarks', 'draft_reason'
+  ];
+
+  const COLS_STEP2 = [
+    'pattern_name', 'pattern_type', 'prefix', 'suffix', 'digit_sum', 'repeat_count',
+    'vip_score', 'auto_detected'
   ];
 
   return (
     <div>
-      <style>{`@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}`}</style>
+      <style>{`
+        @keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+        .fn-scroll-table::-webkit-scrollbar { width: 8px; height: 8px; }
+        .fn-scroll-table::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
+        .fn-scroll-table::-webkit-scrollbar-thumb { background: var(--neon-green-dark, #16a34a); border-radius: 4px; }
+        .fn-scroll-table::-webkit-scrollbar-thumb:hover { background: var(--neon-green, #22c55e); }
+        .fn-scroll-table { scrollbar-color: var(--neon-green-dark, #16a34a) #f1f5f9; scrollbar-width: thin; }
+      `}</style>
       <div style={s.stepBar}>
         {['Upload File', 'Preview & Edit', 'Auto-Fields', 'Confirm'].map((l, i) => (
           <div key={i} style={{ ...s.step, ...(step === i + 1 ? s.stepActive : {}), ...(step > i + 1 ? s.stepDone : {}) }}>
@@ -298,9 +438,9 @@ export default function ImportWorkspace() {
 
       {step === 1 && (
         <div style={s.card}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-            <h2 style={s.cardTitle}>Inventory Upload</h2>
-            <button onClick={downloadTemplate} style={s.outlineBtn}><Download size={16} /> Template</button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+            <h2 style={{ margin: 0 }}>Inventory Upload</h2>
+            <button onClick={downloadTemplate} className="btn btn-secondary"><Download size={16} /> Download Template</button>
           </div>
           <div {...getRootProps()} style={{ ...s.dropzone, ...(isDragActive ? s.dropActive : {}) }}>
             <input {...getInputProps()} />
@@ -317,76 +457,167 @@ export default function ImportWorkspace() {
       )}
 
       {step === 2 && (
-        <div>
-          <div style={s.opStrip}>
-            {[{ l: '➕ Insert', v: stats.inserts, c: '#16a34a', k: 'insert' }, { l: '✏️ Update', v: stats.updates, c: '#1d4ed8', k: 'update' }, { l: '🗑 Delete', v: stats.deletes, c: '#dc2626', k: 'delete' }].map(it => (
-              <div key={it.l} style={{ ...s.opCard, ...(opFilter === it.k ? { outline: '2px solid ' + it.c } : {}) }} onClick={() => setOpFilter(p => p === it.k ? 'all' : it.k)}>
-                <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>{it.l}</p>
-                <p style={{ fontSize: '1.5rem', fontWeight: 900, color: it.c }}>{it.v}</p>
+        <div style={s.card}>
+          {/* Unmatched columns warning */}
+          {unmatchedCols.length > 0 && (
+            <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '12px 16px', marginBottom: '16px', display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+              <Info size={18} style={{ color: '#d97706', flexShrink: 0, marginTop: '2px' }} />
+              <div>
+                <p style={{ margin: 0, fontWeight: 700, color: '#92400e', fontSize: '0.85rem' }}>Unmatched columns (ignored):</p>
+                <p style={{ margin: '4px 0 0 0', color: '#a16207', fontSize: '0.8rem' }}>{unmatchedCols.join(', ')}</p>
               </div>
-            ))}
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: '12px' }}>
-              <button onClick={clearParseSession} style={{ ...s.outlineBtn, color: '#ef4444' }}>Cancel</button>
-              <button onClick={() => setStep(3)} style={s.primaryBtn} disabled={stats.inserts + stats.updates + stats.deletes === 0}>Next Step →</button>
+            </div>
+          )}
+
+          {/* Static stats + nav bar */}
+          <div style={s.opStrip}>
+            <div style={s.opCard}>
+              <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)' }}>VALID ROWS</p>
+              <p style={{ fontSize: '1.5rem', fontWeight: 800, color: '#16a34a' }}>{stats.valid}</p>
+            </div>
+            <div style={s.opCard}>
+              <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)' }}>CONFLICTS</p>
+              <p style={{ fontSize: '1.5rem', fontWeight: 800, color: '#7c3aed' }}>{stats.conflicts}</p>
+            </div>
+            <div style={s.opCard}>
+              <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)' }}>ERRORS</p>
+              <p style={{ fontSize: '1.5rem', fontWeight: 800, color: '#dc2626' }}>{stats.errors}</p>
+            </div>
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: '12px', alignItems: 'center' }}>
+              <button className="btn btn-secondary" onClick={clearParseSession}>Cancel</button>
+              <button className="btn btn-primary" onClick={() => setStep(3)} disabled={stats.valid === 0 && stats.conflicts === 0}>
+                Next: Verify Auto-Fields <ChevronDown size={16} />
+              </button>
             </div>
           </div>
 
+          {/* Static filter tabs */}
           <div style={s.statsTabs}>
-            {[{ k: 'all', l: 'All' }, { k: 'valid', l: '✅ Valid' }, { k: 'missing', l: '⚠️ Missing' }, { k: 'error', l: '❌ Error' }].map(t => (
+            {[{ k: 'all', l: 'All' }, { k: 'valid', l: '✅ Valid' }, { k: 'conflict', l: '🔄 Conflict' }, { k: 'error', l: '❌ Error' }].map(t => (
               <button key={t.k} onClick={() => setFilter(t.k)} style={{ ...s.tabBtn, ...(filter === t.k ? { borderBottom: `3px solid #3b82f6`, color: '#3b82f6' } : {}) }}>{t.l}</button>
             ))}
           </div>
 
-          {selected.length > 0 && (
-            <div style={s.bulkBar}>
-              <span style={{ fontWeight: 700 }}>{selected.length} selected</span>
-              <select value={bulkField} onChange={e => setBulkField(e.target.value)} style={s.smSel}>
-                <option value=''>-- Field --</option>
-                <option value='category'>Category</option>
-                <option value='number_status'>Status</option>
-              </select>
-              <input value={bulkValue} onChange={e => setBulkValue(e.target.value)} placeholder='Value…' style={s.smInp} />
-              <button onClick={applyBulk} style={s.primaryBtn}>Apply</button>
-            </div>
-          )}
-
-          <div style={s.gridWrap}>
+          {/* Scrollable data table */}
+          <div className="fn-scroll-table" style={s.scrollBox}>
             <table style={s.table}>
-              <thead><tr><th style={s.th}><input type='checkbox' onChange={e => setSelected(e.target.checked ? display.map((_, i) => rows.indexOf(display[i])) : [])} /></th><th style={s.th}>Row</th><th style={s.th}>Operation</th>{COLS.map(c => <th key={c} style={s.th} onClick={() => toggleSort(c)}>{c}</th>)}</tr></thead>
+              <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
+                <tr>
+                  <th style={s.th}>Row</th>
+                  <th style={s.th}>Status</th>
+                  {COLS_STEP1.map(c => <th key={c} style={s.th}>{c.replace(/_/g, ' ')}</th>)}
+                </tr>
+              </thead>
               <tbody>{display.slice(0, displayLimit).map((row, vi) => {
                 const ri = rows.indexOf(row);
                 return (
-                  <tr key={vi} style={{ background: selected.includes(ri) ? '#f0fdf4' : 'transparent' }}>
-                    <td style={s.td}><input type='checkbox' checked={selected.includes(ri)} onChange={e => setSelected(p => e.target.checked ? [...p, ri] : p.filter(x => x !== ri))} /></td>
+                  <tr key={vi}>
                     <td style={s.td}><small>{row._rowId}</small></td>
-                    <td style={s.td}><span style={{ ...s.badge, ...OP_STYLES[row._operation] }}>{row._operation}</span></td>
-                    {COLS.map(c => <td key={c} style={{ ...s.td, padding: 0, minWidth: '140px' }}><EditableCell value={row[c]} field={c} rowStatus={row._status} onChange={(f, v) => updateCell(ri, f, v)} /></td>)}
+                    <td style={s.td}>
+                      <span style={{ 
+                        ...s.badge, 
+                        background: row._status === 'valid' ? '#dcfce7' : row._status === 'conflict' ? '#ede9fe' : '#fee2e2',
+                        color: row._status === 'valid' ? '#16a34a' : row._status === 'conflict' ? '#7c3aed' : '#dc2626'
+                      }}>
+                        {row._status.toUpperCase()}
+                      </span>
+                    </td>
+                    {COLS_STEP1.map(c => (
+                      <td key={c} style={{ ...s.td, padding: 0, minWidth: '140px' }}>
+                        <EditableCell 
+                          value={row[c]} 
+                          field={c} 
+                          rowStatus={row._status} 
+                          errors={row._errors}
+                          options={c === 'number_status' ? ['available', 'reserved', 'sold'] : c === 'category' ? ['1', '2', '3', '4'] : c === 'visibility_status' ? ['1', '0'] : null}
+                          onChange={(f, v) => updateCell(ri, f, v)} 
+                        />
+                      </td>
+                    ))}
                   </tr>
                 );
               })}</tbody>
             </table>
           </div>
+
+          {/* Static bottom info */}
+          {display.length > displayLimit && (
+            <div style={{ textAlign: 'center', padding: '12px', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+              Showing {displayLimit} of {display.length} rows.
+              <button onClick={() => setDisplayLimit(p => p + 500)} style={{ marginLeft: '8px', color: '#3b82f6', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>Load more</button>
+            </div>
+          )}
         </div>
       )}
 
       {step === 3 && (
         <div style={s.card}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
-            <h2>Auto-Fields Preview</h2>
-            <div style={{ display: 'flex', gap: '12px' }}><button onClick={() => setStep(2)} style={s.outlineBtn}>← Back</button><button onClick={() => setStep(4)} style={s.primaryBtn}>Next Step →</button></div>
+          {/* Static header + nav */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fffbeb', padding: '16px', borderRadius: '12px', border: '1px solid #fde68a', marginBottom: '20px' }}>
+            <div>
+              <h2 style={{ margin: 0, color: '#854d0e', fontSize: '1.1rem' }}>Step 3: Review Auto-Generated Fields</h2>
+              <p style={{ color: '#92400e', fontSize: '0.85rem', margin: '4px 0 0 0' }}>Verify patterns, scoring, and categories. Grayed columns are locked from Step 2.</p>
+            </div>
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button className="btn btn-secondary" onClick={() => setStep(2)}>← Back to Preview</button>
+              <button className="btn btn-primary" onClick={() => setStep(4)}>Next: Final Summary →</button>
+            </div>
           </div>
-          <div style={s.gridWrap}>
+
+          {/* Scrollable data table */}
+          <div className="fn-scroll-table" style={s.scrollBox}>
             <table style={s.table}>
-              <thead><tr><th>Mobile</th><th>Pattern</th><th>Category</th></tr></thead>
-              <tbody>{rows.filter(r => r._status === 'valid').slice(0, displayLimit3).map((r, i) => (
-                <tr key={i}>
-                  <td>{r.mobile_number}</td>
-                  <td>{r.pattern_type}</td>
-                  <td>{r.category}</td>
+              <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
+                <tr>
+                  <th style={s.th}>Mobile</th>
+                  {COLS_STEP1.slice(1, 4).map(c => <th key={c} style={{ ...s.th, opacity: 0.5 }}>{c.replace(/_/g, ' ')}</th>)}
+                  {COLS_STEP2.map(c => <th key={c} style={{ ...s.th, background: '#fff7ed', color: '#c2410c' }}>{c.replace(/_/g, ' ')}</th>)}
                 </tr>
-              ))}</tbody>
+              </thead>
+              <tbody>
+                {rows.filter(r => r._status === 'valid' || r._status === 'conflict').slice(0, displayLimit3).map((row, i) => {
+                  const ri = rows.indexOf(row);
+                  return (
+                    <tr key={i}>
+                      <td style={{ ...s.td, fontWeight: 700 }}>{row.mobile_number}</td>
+                      {COLS_STEP1.slice(1, 4).map(c => (
+                        <td key={c} style={{ ...s.td, opacity: 0.5, background: '#f8fafc' }}>
+                          <span title="Go to Step 2 to edit this field">{String(row[c] ?? '')}</span>
+                        </td>
+                      ))}
+                      {COLS_STEP2.map(c => (
+                        <td key={c} style={{ ...s.td, padding: 0 }}>
+                          <EditableCell 
+                            value={String(row[c] ?? '')} 
+                            field={c} 
+                            rowStatus={row._status}
+                            options={c === 'pattern_type' ? PATTERN_TYPES : c === 'auto_detected' ? ['1', '0'] : null}
+                            onChange={(f, v) => {
+                               updateCell(ri, f, v);
+                               if (['pattern_type', 'vip_score'].includes(f)) {
+                                 setRows(prev => {
+                                   const updated = [...prev];
+                                   updated[ri].auto_detected = 0;
+                                   return updated;
+                                 });
+                               }
+                            }}
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
+              </tbody>
             </table>
           </div>
+
+          {rows.filter(r => r._status === 'valid' || r._status === 'conflict').length > displayLimit3 && (
+            <div style={{ textAlign: 'center', padding: '12px', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+              Showing {displayLimit3} of {rows.filter(r => r._status === 'valid' || r._status === 'conflict').length} rows.
+              <button onClick={() => setDisplayLimit3(p => p + 500)} style={{ marginLeft: '8px', color: '#3b82f6', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>Load more</button>
+            </div>
+          )}
         </div>
       )}
 
@@ -394,24 +625,69 @@ export default function ImportWorkspace() {
         <div style={s.card}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
             <h2>Confirm Import</h2>
-            <div style={{ display: 'flex', gap: '12px' }}><button onClick={clearParseSession} style={s.outlineBtn}>Cancel</button><button onClick={() => setShowConfirmModal(true)} style={s.primaryBtn}>Proceed →</button></div>
+            <div style={{ display: 'flex', gap: '12px' }}><button onClick={clearParseSession} style={s.outlineBtn}>Cancel</button><button onClick={() => { if (!operatorName) setOperatorName(localStorage.getItem('ag_admin_username') || ''); setShowConfirmModal(true); }} style={s.primaryBtn}>Proceed →</button></div>
           </div>
           <div style={s.summaryGrid}>
-            <div style={s.summaryCard}><p>Inserts</p><h3>{stats.inserts}</h3></div>
-            <div style={s.summaryCard}><p>Updates</p><h3>{stats.updates}</h3></div>
+            <div style={s.summaryCard}><p>Valid Rows</p><h3>{stats.valid}</h3></div>
+            <div style={s.summaryCard}><p>Conflicts (Overwrite)</p><h3>{stats.conflicts}</h3></div>
           </div>
         </div>
       )}
 
       {showConfirmModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
-          <div style={{ background: '#fff', padding: '32px', borderRadius: '16px', width: '440px' }}>
-            <h3>Select Destination</h3>
-            <div style={{ display: 'flex', gap: '12px', margin: '20px 0' }}>
-              <button onClick={() => setImportDestination('store')} style={{ flex: 1, padding: '16px', border: importDestination === 'store' ? '2px solid green' : '1px solid #ddd' }}>Store</button>
-              <button onClick={() => setImportDestination('draft')} style={{ flex: 1, padding: '16px', border: importDestination === 'draft' ? '2px solid orange' : '1px solid #ddd' }}>Drafts</button>
+        <div className="modal-overlay">
+          <div className="card modal-content" style={{ width: '450px', padding: '32px' }}>
+            <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+              <h2 style={{ margin: '0 0 8px 0' }}>Ready to Import</h2>
+              <p style={{ color: 'var(--text-secondary)' }}>Choose where you want to push these numbers.</p>
             </div>
-            <button onClick={handleImport} style={{ ...s.primaryBtn, width: '100%', justifyContent: 'center' }}>Start Import</button>
+            
+            <div style={{ display: 'flex', gap: '16px', marginBottom: '32px' }}>
+              <div 
+                onClick={() => setImportDestination('store')}
+                style={{ 
+                  flex: 1, padding: '20px', borderRadius: '12px', border: '2px solid', 
+                  borderColor: importDestination === 'store' ? 'var(--primary)' : 'var(--border)',
+                  background: importDestination === 'store' ? 'var(--primary-light)' : 'transparent',
+                  cursor: 'pointer', textAlign: 'center', transition: 'all 0.2s'
+                }}
+              >
+                <Check size={24} style={{ color: importDestination === 'store' ? 'var(--primary)' : '#ccc', marginBottom: '8px' }} />
+                <div style={{ fontWeight: 700 }}>Live Store</div>
+              </div>
+              
+              <div 
+                onClick={() => setImportDestination('draft')}
+                style={{ 
+                  flex: 1, padding: '20px', borderRadius: '12px', border: '2px solid', 
+                  borderColor: importDestination === 'draft' ? 'var(--warning)' : 'var(--border)',
+                  background: importDestination === 'draft' ? 'rgba(186, 117, 23, 0.1)' : 'transparent',
+                  cursor: 'pointer', textAlign: 'center', transition: 'all 0.2s'
+                }}
+              >
+                <Archive size={24} style={{ color: importDestination === 'draft' ? 'var(--warning)' : '#ccc', marginBottom: '8px' }} />
+                <div style={{ fontWeight: 700 }}>Draft Numbers</div>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#374151', display: 'block', marginBottom: '6px' }}>
+                Operator Name *
+              </label>
+              <input
+                type="text"
+                className="input"
+                placeholder="Enter your name..."
+                value={operatorName}
+                onChange={(e) => setOperatorName(e.target.value)}
+                style={{ width: '100%' }}
+              />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <button className="btn btn-secondary" onClick={() => setShowConfirmModal(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleImport} disabled={!operatorName.trim()}>Confirm & Start</button>
+            </div>
           </div>
         </div>
       )}
@@ -430,6 +706,7 @@ const s = {
   dropActive: { borderColor: 'var(--neon-green-dark)', background: '#f0fdf4' },
   parsingBox: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', marginTop: '20px', padding: '20px', background: '#f8fafc', borderRadius: '8px' },
   gridWrap: { overflowX: 'auto', border: '1px solid #eee', borderRadius: '8px' },
+  scrollBox: { overflow: 'auto', maxHeight: '60vh', border: '1px solid #e2e8f0', borderRadius: '12px', background: '#fff' },
   table: { width: '100%', borderCollapse: 'collapse' },
   th: { background: '#f9fafb', padding: '10px', textAlign: 'left', fontSize: '0.75rem', fontWeight: 700 },
   td: { padding: '10px', borderBottom: '1px solid #eee', fontSize: '0.85rem' },

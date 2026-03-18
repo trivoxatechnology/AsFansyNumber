@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useRef, useCallback, useEffect } from 'react';
 import { fetchWithAuth } from '../utils/api';
-import { writeOperationLog } from '../utils/operationLog';
 import { API_BASE } from '../config/api';
+import { writeOperationLog } from '../utils/operationLog';
 
 const ImportContext = createContext();
 
@@ -103,7 +103,7 @@ export function ImportProvider({ children }) {
     rows, fileName, importDestination, operatorName, cleanRow
   }) => {
     const id = `bulk_imp_${Date.now()}`;
-    const validRows = rows.filter(r => r._status === 'valid');
+    const validRows = rows.filter(r => r._status === 'valid' || r._status === 'conflict');
     const total = validRows.length;
     const finalOperator = operatorName || localStorage.getItem('ag_admin_username') || 'Admin';
 
@@ -117,6 +117,7 @@ export function ImportProvider({ children }) {
     (async () => {
       let processed = 0, lastDbUpdate = 0;
       const CHUNK_SIZE = 1000;
+      const tableName = importDestination === 'draft' ? 'wp_fn_draft_numbers' : 'wp_fn_numbers';
       const endpoint = importDestination === 'draft' ? `${API_BASE}/wp_fn_draft_numbers/bulk-insert` : `${API_BASE}/wp_fn_numbers/bulk-insert`;
 
       try {
@@ -125,19 +126,45 @@ export function ImportProvider({ children }) {
           if (ctrl.signal.aborted) {
             updateJob(id, { status: 'done', phase: `Cancelled at ${processed}/${total}` });
             await dbJobUpdate(id, { status: 'cancelled', processed });
+            await writeOperationLog({
+              fileName: fileName || 'Import',
+              operationType: 'imported',
+              operationData: `Cancelled at ${processed}/${total}`,
+              totalRecords: processed,
+              tableName,
+              status: 'cancelled',
+              adminName: finalOperator,
+            });
             return;
           }
 
           const chunk = validRows.slice(i, i + CHUNK_SIZE).map(r => cleanRow(r));
-          const res = await fetchWithAuth(endpoint, {
-            method: 'POST',
-            body: JSON.stringify({ records: chunk }),
-            signal: ctrl.signal,
-          });
-          if (!res || !res.ok) {
-            const errText = await (res ? res.text() : Promise.resolve('Unknown Network Error'));
-            throw new Error(`API Error: ${errText}`);
+          console.log(`[Import] Sending chunk ${i / CHUNK_SIZE + 1} (${chunk.length} rows) to ${endpoint}`);
+          
+          let res;
+          try {
+            res = await fetchWithAuth(endpoint, {
+              method: 'POST',
+              body: JSON.stringify({ records: chunk }),
+              signal: ctrl.signal,
+            });
+          } catch (fetchErr) {
+            console.error('[Import] Network error:', fetchErr);
+            throw new Error(`Network Error: ${fetchErr.message} — check if API server is reachable`);
           }
+
+          if (!res) {
+            throw new Error('Auth failed (401) — please re-login and try again');
+          }
+
+          if (!res.ok) {
+            const errBody = await res.text().catch(() => 'Could not read response');
+            console.error(`[Import] HTTP ${res.status}:`, errBody.slice(0, 500));
+            throw new Error(`HTTP ${res.status}: ${errBody.slice(0, 200)}`);
+          }
+
+          const resData = await res.json().catch(() => null);
+          console.log(`[Import] Chunk ${i / CHUNK_SIZE + 1} result:`, resData);
           processed += chunk.length;
           updateJob(id, { current: processed, phase: `Importing ${processed}/${total}...` });
           if (Date.now() - lastDbUpdate > 3000) {
@@ -147,6 +174,15 @@ export function ImportProvider({ children }) {
         }
         await dbJobUpdate(id, { status: 'done', processed: total });
         updateJob(id, { status: 'done', current: total, phase: 'Complete' });
+        await writeOperationLog({
+          fileName: fileName || 'Import',
+          operationType: 'imported',
+          operationData: `Imported ${total} records to ${tableName}`,
+          totalRecords: total,
+          tableName,
+          status: 'completed',
+          adminName: finalOperator,
+        });
       } catch (err) {
         if (err?.name === 'AbortError') {
           updateJob(id, { status: 'done', phase: `Cancelled at ${processed}/${total}` });
@@ -155,6 +191,15 @@ export function ImportProvider({ children }) {
           const errMsg = err?.message || 'Unknown error';
           await dbJobUpdate(id, { status: 'failed', processed, phase: 'Error: ' + errMsg });
           updateJob(id, { status: 'done', phase: 'Error: ' + errMsg });
+          await writeOperationLog({
+            fileName: fileName || 'Import',
+            operationType: 'imported',
+            operationData: `Error: ${errMsg} (processed ${processed}/${total})`,
+            totalRecords: processed,
+            tableName,
+            status: 'error',
+            adminName: finalOperator,
+          });
         }
       }
     })();

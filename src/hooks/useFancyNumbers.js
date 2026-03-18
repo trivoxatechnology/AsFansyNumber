@@ -3,8 +3,7 @@ import { useState, useEffect, useMemo } from 'react';
 const API_BASE = 'https://asfancynumber.com/fancy_number/api.php';
 
 export function useFancyNumbers() {
-  const [numbers, setNumbers] = useState([]);
-  const [categories, setCategories] = useState([]);
+  const [rawNumbers, setRawNumbers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState(null);
@@ -29,30 +28,25 @@ export function useFancyNumbers() {
       if (!background) setError(null);
       
       try {
-        const [numRes, catRes] = await Promise.all([
-          fetch(`${API_BASE}/wp_fn_numbers?limit=10000`, opts),
-          fetch(`${API_BASE}/wp_fn_number_categories`, opts)
-        ]);
+        const numRes = await fetch(`${API_BASE}/wp_fn_numbers?limit=10000`, opts);
 
-        if (!numRes.ok || !catRes.ok) {
+        if (!numRes.ok) {
           throw new Error('Failed to fetch data from API');
         }
 
         let numsData = await numRes.json();
-        const catsData = await catRes.json();
 
-        // Automatically expire old offers, and filter out draft/hidden numbers
+        // Filter out draft/hidden numbers and expire old offers
         const now = new Date();
         numsData = numsData.filter(n => n.visibility_status !== '0' && n.visibility_status !== 0).map(n => {
           if (n.offer_end_date && new Date(n.offer_end_date) < now) {
-            return { ...n, offer_price: null, discount_percentage: null };
+            return { ...n, offer_price: null };
           }
           return n;
         });
 
         if (isMounted) {
-          setNumbers(numsData);
-          setCategories(catsData);
+          setRawNumbers(numsData);
         }
       } catch (err) {
         if (err?.name !== 'AbortError') {
@@ -87,7 +81,7 @@ export function useFancyNumbers() {
   };
 
   const filteredNumbers = useMemo(() => {
-    let result = [...numbers];
+    let result = [...rawNumbers];
 
     if (filters.query) {
       const q = String(filters.query).toUpperCase();
@@ -152,7 +146,10 @@ export function useFancyNumbers() {
     }
 
     if (filters.category) {
-      result = result.filter(n => String(n.category) === String(filters.category));
+      result = result.filter(n => {
+        const cat = String(n.number_category || '5');
+        return cat === String(filters.category);
+      });
     }
 
     if (filters.pattern_type) {
@@ -195,7 +192,7 @@ export function useFancyNumbers() {
     }
 
     return result;
-  }, [numbers, filters]);
+  }, [rawNumbers, filters]);
 
   const resetFilters = () => {
     setFilters({
@@ -214,7 +211,7 @@ export function useFancyNumbers() {
 
   return {
     numbers: filteredNumbers,
-    categories,
+    allNumbers: rawNumbers,
     loading,
     isRefreshing,
     error,

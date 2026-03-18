@@ -8,10 +8,16 @@ const formatPrice = (price) => {
   }).format(price);
 };
 
+const getItemPrice = (item) => {
+  const offerPrice = parseFloat(item.offer_price) || 0;
+  const basePrice = parseFloat(item.base_price) || 0;
+  return offerPrice > 0 ? offerPrice : basePrice;
+};
+
 export default function CartModal({ isOpen, onClose, cartItems, onToggleCart }) {
   if (!isOpen) return null;
 
-  const total = cartItems.reduce((acc, item) => acc + (parseFloat(item.price) || 0), 0);
+  const total = cartItems.reduce((acc, item) => acc + getItemPrice(item), 0);
 
   const handleCheckout = () => {
     if (cartItems.length === 0) {
@@ -38,10 +44,10 @@ export default function CartModal({ isOpen, onClose, cartItems, onToggleCart }) 
             </p>
           ) : (
             cartItems.map((item) => (
-              <div key={item.id || item.number_id} style={styles.cartItem}>
+              <div key={item.number_id || item.id} style={styles.cartItem}>
                 <div>
                   <h4 style={styles.itemNumber}>{item.mobile_number}</h4>
-                  <div style={styles.itemPrice}>{formatPrice(parseFloat(item.price) || 0)}</div>
+                  <div style={styles.itemPrice}>{formatPrice(getItemPrice(item))}</div>
                 </div>
                 <button 
                   style={styles.removeBtn} 

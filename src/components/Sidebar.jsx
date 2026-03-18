@@ -8,9 +8,16 @@ const formatPrice = (price) => {
   }).format(price);
 };
 
+const CATEGORY_OPTIONS = [
+  { value: '', label: 'All Categories' },
+  { value: '1', label: '💎 Diamond' },
+  { value: '2', label: '💍 Platinum' },
+  { value: '3', label: '⭐ Gold' },
+  { value: '4', label: '🥈 Silver' },
+  { value: '5', label: '📱 Normal' },
+];
+
 export default function Sidebar({ numbers, filters, onFilterChange, onReset }) {
-  const CATEGORIES = ['Diamond', 'Platinum', 'Gold', 'Silver', 'Bronze'];
-  
   const uniquePatterns = useMemo(() => {
     return [...new Set(numbers.map(n => n.pattern_type).filter(Boolean))].sort();
   }, [numbers]);
@@ -27,9 +34,8 @@ export default function Sidebar({ numbers, filters, onFilterChange, onReset }) {
             value={filters.category}
             onChange={(e) => onFilterChange('category', e.target.value)}
           >
-            <option value="">All Ranks</option>
-            {CATEGORIES.map(cat => (
-              <option key={cat} value={cat}>{cat}</option>
+            {CATEGORY_OPTIONS.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
         </div>
