@@ -46,20 +46,25 @@ export function ImportProvider({ children }) {
   useEffect(() => {
     mountedRef.current = true;
     fetchDbJobs();
-    return () => { mountedRef.current = false; };
-  }, [fetchDbJobs]);
+    const timer = setInterval(() => {
+      if (jobs.some(j => j.status === 'running') || dbJobs.some(j => j.status === 'running')) {
+        fetchDbJobs();
+      }
+    }, 15000);
+    return () => { mountedRef.current = false; clearInterval(timer); };
+  }, [fetchDbJobs, jobs, dbJobs]);
 
   const hasActiveJobs = jobs.some(j => j.status === 'running') || dbJobs.some(j => j.status === 'running');
 
   const [parseSession, setParseSession] = useState({
     rows: [], step: 1, fileName: '', isParsing: false, parseProgress: '',
-    operatorName: localStorage.getItem('ag_admin_username') || '',
+    operatorName: localStorage.getItem('adminUsername') || '',
   });
 
   const updateParseSession = useCallback((patch) => setParseSession(prev => ({ ...prev, ...patch })), []);
   const clearParseSession = useCallback(() => setParseSession({
     rows: [], step: 1, fileName: '', isParsing: false, parseProgress: '',
-    operatorName: localStorage.getItem('ag_admin_username') || '',
+    operatorName: localStorage.getItem('adminUsername') || '',
   }), []);
 
   const updateJob = useCallback((id, patch) => {
@@ -105,7 +110,7 @@ export function ImportProvider({ children }) {
     const id = `bulk_imp_${Date.now()}`;
     const validRows = rows.filter(r => r._status === 'valid');
     const total = validRows.length;
-    const finalOperator = operatorName || localStorage.getItem('ag_admin_username') || 'Admin';
+    const finalOperator = operatorName || localStorage.getItem('adminUsername') || 'Admin';
 
     // Create AbortController for this job
     const ctrl = new AbortController();
@@ -163,7 +168,7 @@ export function ImportProvider({ children }) {
   const runDeleteOperation = useCallback(async ({ toDelete, fileName, destination, operatorName }) => {
     const id = `bulk_del_${Date.now()}`;
     const total = toDelete.length;
-    const finalOperator = operatorName || localStorage.getItem('ag_admin_username') || 'Admin';
+    const finalOperator = operatorName || localStorage.getItem('adminUsername') || 'Admin';
 
     const ctrl = new AbortController();
     abortControllers.current[id] = ctrl;

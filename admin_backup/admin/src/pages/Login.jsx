@@ -18,7 +18,7 @@ export default function Login() {
     try {
       const result = await login(username, password);
       if (result.success) {
-        navigate('/inventory');
+        navigate('/dashboard');
       } else {
         setError(result.error || 'Login failed. Please try again.');
       }
@@ -34,9 +34,9 @@ export default function Login() {
     <div style={styles.container}>
       <div style={styles.card}>
         <div style={styles.header}>
-          <img src="/logo.png" alt="Logo" style={styles.logoImg} onError={(e) => e.target.style.display='none'} />
+          <img src="/logo.png" alt="Logo" style={styles.logo} onError={(e) => e.target.style.display='none'} />
           <h1 style={styles.title}>Admin Portal</h1>
-          <p style={styles.subtitle}>Sign in to AsFancyNumber management</p>
+          <p style={styles.subtitle}>Sign in to manage inventory</p>
         </div>
 
         {error && <div style={styles.error}>{error}</div>}
@@ -98,35 +98,33 @@ const styles = {
     background: 'var(--bg-card)',
     padding: '40px',
     borderRadius: 'var(--radius-lg)',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
-    border: '1px solid var(--border)',
+    boxShadow: 'var(--shadow-lg)',
+    border: '1px solid var(--border-color)',
   },
   header: {
     textAlign: 'center',
     marginBottom: '30px',
   },
-  logoImg: {
-    width: '64px',
-    height: '64px',
+  logo: {
+    width: '60px',
+    height: '60px',
     borderRadius: '50%',
+    marginBottom: '16px',
     objectFit: 'cover',
-    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-    margin: '0 auto 16px',
-    display: 'block',
   },
   title: {
     fontSize: '1.8rem',
-    color: 'var(--text-primary)',
+    color: 'var(--text-main)',
     fontWeight: 800,
   },
   subtitle: {
-    color: 'var(--text-secondary)',
+    color: 'var(--text-muted)',
     fontSize: '0.9rem',
     marginTop: '4px',
   },
   error: {
-    background: 'var(--danger-bg)',
-    color: 'var(--danger-text)',
+    background: '#fee2e2',
+    color: '#ef4444',
     padding: '10px 14px',
     borderRadius: 'var(--radius-md)',
     marginBottom: '20px',
@@ -147,29 +145,27 @@ const styles = {
   icon: {
     position: 'absolute',
     left: '14px',
-    color: 'var(--text-secondary)',
+    color: 'var(--text-muted)',
   },
   input: {
     width: '100%',
     padding: '12px 14px 12px 40px',
-    border: '1px solid var(--border)',
+    border: '1px solid var(--border-color)',
     borderRadius: 'var(--radius-md)',
-    background: '#FAFAF8',
-    color: 'var(--text-primary)',
+    background: '#f8fafc',
+    color: 'var(--text-main)',
     fontSize: '1rem',
-    fontFamily: 'var(--font-sans)',
     outline: 'none',
     transition: 'border-color 0.2s',
   },
   button: {
-    background: 'var(--primary)',
+    background: 'var(--neon-green-dark)',
     color: '#fff',
     border: 'none',
     padding: '14px',
     borderRadius: 'var(--radius-md)',
     fontSize: '1rem',
     fontWeight: 700,
-    fontFamily: 'var(--font-sans)',
     cursor: 'pointer',
     marginTop: '10px',
     transition: 'opacity 0.2s',

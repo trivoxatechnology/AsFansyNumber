@@ -2,7 +2,7 @@ import { API_BASE } from '../config/api';
 
 // Utility for making authenticated API calls
 export const fetchWithAuth = async (url, options = {}) => {
-  const token = localStorage.getItem('adminToken');
+  const token = localStorage.getItem('ag_admin_token');
   
   const authOptions = {
     ...options,
@@ -18,9 +18,7 @@ export const fetchWithAuth = async (url, options = {}) => {
     
     // Handle authentication errors
     if (response.status === 401) {
-      localStorage.removeItem('adminToken');
-      localStorage.removeItem('adminUsername');
-      window.location.href = '/login';
+      console.warn('API returned 401 Unauthorized. Live backend may be rejecting the local dev token.');
       return null;
     }
     

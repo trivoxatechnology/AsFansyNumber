@@ -1,0 +1,98 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  /* Brand Colors */
+  --primary: #534AB7;
+  --primary-hover: #4339A6;
+  --primary-light: #EEEDFE;
+  
+  /* Status Colors */
+  --success: #1D9E75;
+  --success-bg: #EAF3DE;
+  --success-text: #3B6D11;
+  
+  --warning: #BA7517;
+  --warning-bg: #FAEEDA;
+  --warning-text: #854F0B;
+  
+  --danger: #A32D2D;
+  --danger-bg: #FCEBEB;
+  --danger-text: #A32D2D;
+  
+  /* Category Colors */
+  --diamond-bg: #EEEDFE;
+  --diamond-text: #3C3489;
+  --platinum-bg: #E1F5EE;
+  --platinum-text: #0F6E56;
+  --gold-bg: #FAEEDA;
+  --gold-text: #854F0B;
+  --silver-bg: #F1EFE8;
+  --silver-text: #5F5E5A;
+  --normal-bg: #F1EFE8;
+  --normal-text: #888780;
+
+  /* Neutral Colors */
+  --bg-main: #F8F8F6;
+  --bg-card: #FFFFFF;
+  --text-primary: #1A1A1A;
+  --text-secondary: #6B6B68;
+  --border: rgba(0, 0, 0, 0.08);
+  --border-focus: #534AB7;
+  
+  /* Layout */
+  --sidebar-width: 260px;
+  --sidebar-collapsed-width: 80px;
+  --topbar-height: 64px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  
+  /* Typography */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--bg-main);
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.container-fluid {
+  width: 100%;
+  padding-right: 24px;
+  padding-left: 24px;
+  margin-right: auto;
+  margin-left: auto;
+}
+
+/* Utils */
+.flex { display: flex; }
+.items-center { align-items: center; }
+.justify-between { justify-content: space-between; }
+.gap-2 { gap: 8px; }
+.mt-4 { margin-top: 16px; }
+.mb-4 { margin-bottom: 16px; }

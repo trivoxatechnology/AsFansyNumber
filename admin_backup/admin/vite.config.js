@@ -7,7 +7,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/fancy_number': {
-        target: 'https://asfancynumber.com',
+        target: 'http://asfancynumber.com',
         changeOrigin: true,
         secure: false,
       }

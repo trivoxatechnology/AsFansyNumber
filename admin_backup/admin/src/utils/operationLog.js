@@ -20,7 +20,7 @@ export async function writeOperationLog({
   status        = 'completed',
   adminName     = '',
 }) {
-  const fallbackAdmin = localStorage.getItem('ag_admin_username') || 'Admin';
+  const fallbackAdmin = localStorage.getItem('adminUsername') || 'Admin';
   const finalAdmin    = String(adminName || fallbackAdmin).trim() || 'Admin';
 
   const payload = {

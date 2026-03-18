@@ -5,7 +5,7 @@
  * Strategy:
  *  - Credentials are stored in .env (never in source code)
  *  - Password is compared as a SHA-256 hash (never plaintext)
- *  - Session token = base64(username|issuedAt) stored in localStorage
+ *  - Session token = base64(username|role|issuedAt) stored in localStorage
  *  - Token is validated client-side on every ProtectedRoute render (expiry check)
  */
 
@@ -51,10 +51,12 @@ function decodeToken(token) {
  * Returns { success: true, username } or { success: false, error: '...' }
  */
 export async function login(username, password) {
+  // Guard: ensure env vars are configured
   if (!ADMIN_USERNAME || !ADMIN_PASSWORD_HASH) {
     return { success: false, error: 'Admin credentials not configured. Check .env file.' };
   }
 
+  // Hash the entered password
   let hash;
   try {
     hash = await sha256(password);
@@ -62,13 +64,17 @@ export async function login(username, password) {
     return { success: false, error: 'Hashing failed — browser may not support Web Crypto API.' };
   }
 
+  // Compare (both username and password must match)
   const isUsernameMatch = username.trim().toLowerCase() === ADMIN_USERNAME.trim().toLowerCase();
   const isHashMatch = hash.trim().toLowerCase() === ADMIN_PASSWORD_HASH.trim().toLowerCase();
+
+  // Debug removed in v4.0 — never log credentials in production
 
   if (!isUsernameMatch || !isHashMatch) {
     return { success: false, error: 'Invalid username or password.' };
   }
 
+  // Issue session token
   const token = buildToken(username.trim());
   localStorage.setItem(TOKEN_KEY, token);
   localStorage.setItem(USERNAME_KEY, username.trim());
@@ -85,19 +91,19 @@ export function validateSession() {
   if (!token) return false;
 
   const data = decodeToken(token);
-  if (!data) return false;
+  if (!data) return false; // Malformed or old "mock-secure-token" — rejected
 
-  const ageMs    = Date.now() - data.issuedAt;
-  const maxAgeMs = SESSION_HOURS * 60 * 60 * 1000;
+  const ageMs      = Date.now() - data.issuedAt;
+  const maxAgeMs   = SESSION_HOURS * 60 * 60 * 1000;
   if (ageMs > maxAgeMs) {
-    logout();
+    logout(); // Expired — clean up
     return false;
   }
 
   return true;
 }
 
-/** Clear session data. */
+/** Clear session data and redirect to login. */
 export function logout() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USERNAME_KEY);
@@ -105,13 +111,14 @@ export function logout() {
 
 /**
  * Utility: Generate a SHA-256 hash for any password string.
+ * Use this in your browser console to create a new VITE_ADMIN_PASSWORD_HASH.
  * Example: generateHash('myNewPassword').then(console.log)
  */
 export async function generateHash(password) {
   return sha256(password);
 }
 
-// Dev-only escape hatch
+// Dev-only escape hatch — never available in production builds
 if (import.meta.env.DEV) {
   window.__forceLogin = () => {
     const token = buildToken('admin');

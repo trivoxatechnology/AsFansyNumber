@@ -1,6 +1,7 @@
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { 
-  List, UploadCloud, Archive, LogOut 
+  LayoutGrid, List, UploadCloud, FileText, Archive, 
+  CheckCircle, Users, MessageCircle, Clock, LogOut 
 } from 'lucide-react';
 import { logout } from '../utils/authService';
 import ErrorBoundary from '../utils/ErrorBoundary';
@@ -17,17 +18,29 @@ export default function DashboardLayout() {
 
   const navItems = [
     { section: 'MAIN', items: [
-      { path: '/inventory', icon: <List size={18} />, label: 'Inventory Manager' },
-      { path: '/upload', icon: <UploadCloud size={18} />, label: 'Upload Manager' },
+      { path: '/dashboard', icon: <LayoutGrid size={18} />, label: 'Dashboard' },
+      { path: '/inventory', icon: <List size={18} />, label: 'Inventory' },
+      { path: '/upload', icon: <UploadCloud size={18} />, label: 'Upload Center' },
+      { path: '/logs', icon: <FileText size={18} />, label: 'Upload Logs' },
       { path: '/drafts', icon: <Archive size={18} />, label: 'Draft Manager' },
+      { path: '/sold', icon: <CheckCircle size={18} />, label: 'Sold Numbers' },
     ]},
+    { section: 'MANAGEMENT', items: [
+      { path: '/dealers', icon: <Users size={18} />, label: 'Dealers' },
+      { path: '/whatsapp', icon: <MessageCircle size={18} />, label: 'WhatsApp Config' },
+    ]},
+    { section: 'SYSTEM', items: [
+      { path: '/activity', icon: <Clock size={18} />, label: 'Activity Log' },
+    ]}
   ];
+
+  const sidebarCollapsed = localStorage.getItem('ag_sidebar_collapsed') === 'true';
 
   return (
     <div className="flex" style={{ minHeight: '100vh' }}>
       {/* Sidebar */}
       <aside className="sidebar" style={{
-        width: 'var(--sidebar-width)',
+        width: sidebarCollapsed ? 'var(--sidebar-collapsed-width)' : 'var(--sidebar-width)',
         background: 'var(--bg-card)',
         borderRight: '1px solid var(--border)',
         display: 'flex',
@@ -35,18 +48,19 @@ export default function DashboardLayout() {
         position: 'fixed',
         height: '100vh',
         zIndex: 50,
+        transition: 'width 0.3s ease'
       }}>
         <div style={{ padding: '24px 20px', display: 'flex', alignItems: 'center', gap: '12px', borderBottom: '1px solid var(--border)' }}>
-          <img src="/logo.png" alt="Logo" style={{ width: '40px', height: '40px', borderRadius: '50%', objectFit: 'cover', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }} onError={(e) => e.target.style.display='none'} />
-          <h2 style={{ fontSize: '1.2rem', fontWeight: 800, margin: 0 }}>As<span style={{ color: 'var(--primary)' }}>FancyNumber</span></h2>
+          <div style={{ width: '32px', height: '32px', background: 'var(--primary)', borderRadius: '8px', flexShrink: 0 }} />
+          {!sidebarCollapsed && <h2 style={{ fontSize: '1rem', fontWeight: 800, margin: 0 }}>Antigravity</h2>}
         </div>
 
         <nav style={{ flex: 1, padding: '20px 12px', overflowY: 'auto' }}>
           {navItems.map((group, idx) => (
             <div key={idx} style={{ marginBottom: '24px' }}>
-              <p style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary)', marginLeft: '12px', marginBottom: '8px', letterSpacing: '0.05em' }}>{group.section}</p>
+              {!sidebarCollapsed && <p style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary)', marginLeft: '12px', marginBottom: '8px', letterSpacing: '0.05em' }}>{group.section}</p>}
               {group.items.map((item) => {
-                const isActive = location.pathname === item.path || (item.path === '/inventory' && location.pathname === '/');
+                const isActive = location.pathname === item.path || (item.path === '/dashboard' && location.pathname === '/');
                 return (
                   <Link 
                     key={item.path} 
@@ -66,7 +80,7 @@ export default function DashboardLayout() {
                     }}
                   >
                     <span style={{ flexShrink: 0 }}>{item.icon}</span>
-                    <span>{item.label}</span>
+                    {!sidebarCollapsed && <span>{item.label}</span>}
                   </Link>
                 )
               })}
@@ -75,9 +89,9 @@ export default function DashboardLayout() {
         </nav>
 
         <div style={{ padding: '12px', borderTop: '1px solid var(--border)' }}>
-          <button onClick={handleLogout} className="btn btn-secondary" style={{ width: '100%', justifyContent: 'flex-start', border: 'none' }}>
+          <button onClick={handleLogout} className="btn btn-secondary" style={{ width: '100%', justifyContent: sidebarCollapsed ? 'center' : 'flex-start', border: 'none' }}>
             <LogOut size={18} />
-            <span>Logout</span>
+            {!sidebarCollapsed && <span>Logout</span>}
           </button>
         </div>
       </aside>
@@ -85,8 +99,9 @@ export default function DashboardLayout() {
       {/* Main Content Area */}
       <main style={{ 
         flex: 1, 
-        marginLeft: 'var(--sidebar-width)',
+        marginLeft: sidebarCollapsed ? 'var(--sidebar-collapsed-width)' : 'var(--sidebar-width)',
         minHeight: '100vh',
+        transition: 'margin-left 0.3s ease'
       }}>
         <header style={{
           height: 'var(--topbar-height)',
@@ -102,15 +117,15 @@ export default function DashboardLayout() {
           zIndex: 40
         }}>
           <h1 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>
-            {navItems.flatMap(g => g.items).find(i => i.path === location.pathname)?.label || 'Admin Panel'}
+            {navItems.flatMap(g => g.items).find(i => i.path === location.pathname)?.label || 'Dashboard'}
           </h1>
           
           <div className="flex items-center gap-2">
-            <div style={{ textAlign: 'right' }}>
+            <div style={{ textAlign: 'right', display: sidebarCollapsed ? 'none' : 'block' }}>
               <p style={{ margin: 0, fontSize: '13px', fontWeight: 600 }}>{adminUsername}</p>
               <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-secondary)' }}>Administrator</p>
             </div>
-            <div style={{ width: '36px', height: '36px', background: 'var(--primary-light)', color: 'var(--primary)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>
+            <div style={{ width: '36px', height: '36px', background: 'var(--primary-light)', color: 'var(--primary)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyCenter: 'center', fontWeight: 700 }}>
               {adminUsername.charAt(0).toUpperCase()}
             </div>
           </div>
@@ -125,3 +140,4 @@ export default function DashboardLayout() {
     </div>
   );
 }
+
