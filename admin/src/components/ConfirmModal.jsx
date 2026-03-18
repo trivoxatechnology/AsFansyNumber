@@ -3,11 +3,7 @@ import { useState, useCallback, createContext, useContext } from 'react';
 /**
  * Styled confirmation modal — replaces all window.confirm() calls.
  * Usage:
-<<<<<<< HEAD
  *   const confirm = useConfirm();
-=======
- *   const { confirm } = useConfirm();
->>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
  *   const ok = await confirm('Delete 500 numbers?', 'This cannot be undone.');
  *   if (ok) { ... }
  */

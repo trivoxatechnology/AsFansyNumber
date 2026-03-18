@@ -17,11 +17,7 @@ export default class ErrorBoundary extends Component {
         <div style={{
           padding: '40px',
           textAlign: 'center',
-<<<<<<< HEAD
           color: 'var(--text-secondary)'
-=======
-          color: 'var(--text-muted)'
->>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
         }}>
           <h3 style={{ marginBottom: '12px' }}>
             This page had an error
@@ -38,11 +34,7 @@ export default class ErrorBoundary extends Component {
             }
             style={{
               padding: '10px 24px',
-<<<<<<< HEAD
               background: 'var(--primary)',
-=======
-              background: 'var(--neon-green-dark)',
->>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
               color: '#fff',
               border: 'none',
               borderRadius: '8px',

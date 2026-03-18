@@ -3,11 +3,7 @@ import { useState, useCallback, createContext, useContext } from 'react';
 /** 
  * Toast notification system — replaces all alert() calls across admin panel.
  * Usage:
-<<<<<<< HEAD
  *   const toast = useToast();
-=======
- *   const { toast } = useToast();
->>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
  *   toast.success('Saved!');
  *   toast.error('Failed');
  *   toast.info('Processing...');

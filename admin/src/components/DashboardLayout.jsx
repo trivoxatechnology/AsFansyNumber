@@ -3,7 +3,6 @@ import {
   List, UploadCloud, Archive, LogOut, Loader2, CheckCircle, AlertCircle, X, Clock
 } from 'lucide-react';
 import { logout } from '../utils/authService';
-<<<<<<< HEAD
 import { useImport } from '../context/ImportContext';
 import ErrorBoundary from '../utils/ErrorBoundary';
 
@@ -48,9 +47,6 @@ function ImportProgressBar() {
     </div>
   );
 }
-=======
-import ErrorBoundary from '../utils/ErrorBoundary';
->>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
 
 export default function DashboardLayout() {
   const navigate = useNavigate();
@@ -164,13 +160,9 @@ export default function DashboardLayout() {
           </div>
         </header>
 
-<<<<<<< HEAD
         <ImportProgressBar />
 
         <div className="container-fluid" style={{ padding: '24px' }}>
-=======
-        <div style={styles.content}>
->>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
           <ErrorBoundary>
             <Outlet />
           </ErrorBoundary>

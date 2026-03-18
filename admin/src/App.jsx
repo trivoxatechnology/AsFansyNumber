@@ -6,21 +6,17 @@ import ErrorBoundary from './utils/ErrorBoundary';
 
 // Layout & Infrastructure
 import DashboardLayout from './components/DashboardLayout';
-<<<<<<< HEAD
-import Inventory from './pages/Inventory';
-import UploadManager from './pages/UploadManager';
-import DraftManager from './pages/DraftManager';
-import LogHistory from './pages/LogHistory';
-import { ImportProvider } from './context/ImportContext';
-import { OperatorProvider } from './components/OperatorPrompt';
-=======
 import Login from './pages/Login';
 
 // Actual Pages
 import Dashboard from './pages/Dashboard';
 import Inventory from './pages/Inventory';
+import UploadManager from './pages/UploadManager';
+import DraftManager from './pages/DraftManager';
 import DraftManagement from './pages/DraftManagement';
->>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
+import LogHistory from './pages/LogHistory';
+import { ImportProvider } from './context/ImportContext';
+import { OperatorProvider } from './components/OperatorPrompt';
 
 // Placeholder Pages (To be built next)
 const UploadCenter = () => <div className="card"><h2>Upload Center</h2><p>Coming soon...</p></div>;
@@ -60,53 +56,35 @@ const toastCSS = `@keyframes toastSlideIn{from{transform:translateX(100%);opacit
 
 export default function App() {
   return (
-<<<<<<< HEAD
-    <ToastProvider>
-      <ConfirmProvider>
-        <style>{toastCSS}</style>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-
-            {/* Protected Dashboard Routes */}
-            <Route path="/" element={<DashboardWrapper />}>
-              <Route index element={<Navigate to="/inventory" replace />} />
-              <Route path="inventory" element={<Inventory />} />
-              <Route path="upload" element={<UploadManager />} />
-              <Route path="drafts" element={<DraftManager />} />
-              <Route path="logs" element={<LogHistory />} />
-            </Route>
-          </Routes>
-        </BrowserRouter>
-      </ConfirmProvider>
-    </ToastProvider>
-=======
     <ErrorBoundary>
       <ToastProvider>
         <ConfirmProvider>
+          <style>{toastCSS}</style>
           <BrowserRouter basename="/admin">
             <Routes>
               <Route path="/login" element={<Login />} />
               
-              <Route path="/" element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
+              <Route path="/" element={<DashboardWrapper />}>
                 <Route index element={<Navigate to="/dashboard" replace />} />
                 <Route path="dashboard" element={<Dashboard />} />
                 <Route path="inventory" element={<Inventory />} />
                 
-                {/* New Pages */}
-                <Route path="upload" element={<UploadCenter />} />
-                <Route path="logs" element={<UploadLogs />} />
-                <Route path="drafts" element={<DraftManagement />} />
+                {/* Refactored Pages */}
+                <Route path="upload" element={<UploadManager />} />
+                <Route path="drafts" element={<DraftManager />} />
+                <Route path="logs" element={<LogHistory />} />
+                
+                {/* Future Pages */}
                 <Route path="sold" element={<SoldNumbers />} />
                 <Route path="dealers" element={<Dealers />} />
                 <Route path="whatsapp" element={<WhatsAppConfig />} />
                 <Route path="activity" element={<ActivityLog />} />
 
                 {/* Legacy fallback / migration paths */}
-                <Route path="import-workspace" element={<Navigate to="/admin/upload" replace />} />
+                <Route path="import-workspace" element={<Navigate to="/upload" replace />} />
                 <Route path="offer-upload" element={<OfferUpload />} />
                 <Route path="delete-excel" element={<DeleteExcel />} />
-                <Route path="draft-management" element={<Navigate to="/admin/drafts" replace />} />
+                <Route path="draft-management" element={<Navigate to="/drafts" replace />} />
               </Route>
               
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
@@ -115,6 +93,5 @@ export default function App() {
         </ConfirmProvider>
       </ToastProvider>
     </ErrorBoundary>
->>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
   );
 }

@@ -1,52 +1,9 @@
 import { API_BASE } from '../config/api';
 
-<<<<<<< HEAD
-// Utility for making authenticated API calls
+const SAFE_FALLBACK = null;
+
 export const fetchWithAuth = async (url, options = {}) => {
   const token = localStorage.getItem('ag_admin_token');
-  
-  const authOptions = {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-      ...options.headers,
-    },
-  };
-
-  try {
-    const response = await fetch(url, authOptions);
-    
-    // Handle authentication errors
-    if (response.status === 401) {
-      console.warn('API returned 401 Unauthorized. Live backend may be rejecting the local dev token.');
-      return null;
-=======
-/**
- * Null-safe fallback response — prevents 'Cannot read property of null' errors.
- * Every page component can safely call `res.json()` without checking null first.
- */
-const SAFE_FALLBACK = {
-  ok: false,
-  status: 0,
-  json: async () => [],
-  text: async () => '',
-  headers: new Headers(),
-};
-
-/**
- * Enhanced fetch with auth, timeouts, and automatic retry for 5xx errors.
- */
-export const fetchWithAuth = async (url, options = {}) => {
-  const token = localStorage.getItem('ag_admin_token');
-  if (!token) {
-    if (window.location.pathname !== '/admin/login' && window.location.pathname !== '/login') {
-      window.location.replace('/admin/login');
->>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
-    }
-    return SAFE_FALLBACK;
-  }
-
   const MAX_RETRIES = 2;
   const TIMEOUT_MS  = 30000;
 
@@ -95,18 +52,6 @@ export const fetchWithAuth = async (url, options = {}) => {
   return SAFE_FALLBACK;
 };
 
-/**
- * Safely extract JSON from a response. Always returns a value, never throws.
- */
-export const safeJson = async (res) => {
-  if (!res || !res.ok) return null;
-  try {
-    return await res.json();
-  } catch {
-    return null;
-  }
-};
-
 export const getWithAuth = async (url, options = {}) => {
   return fetchWithAuth(url, { method: 'GET', ...options });
 };
@@ -131,10 +76,6 @@ export const deleteWithAuth = async (url, options = {}) => {
   return fetchWithAuth(url, { method: 'DELETE', ...options });
 };
 
-/**
- * Safely parse JSON from a fetch response.
- * Returns null if response is null, empty, or not JSON.
- */
 export const safeJson = async (response) => {
   if (!response || !response.ok) return null;
   try {
