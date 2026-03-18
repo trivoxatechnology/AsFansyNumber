@@ -65,6 +65,11 @@ export async function login(username, password) {
   const isUsernameMatch = username.trim().toLowerCase() === ADMIN_USERNAME.trim().toLowerCase();
   const isHashMatch = hash.trim().toLowerCase() === ADMIN_PASSWORD_HASH.trim().toLowerCase();
 
+<<<<<<< HEAD
+=======
+  // Debug removed in v4.0 — never log credentials in production
+
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
   if (!isUsernameMatch || !isHashMatch) {
     return { success: false, error: 'Invalid username or password.' };
   }
@@ -111,7 +116,11 @@ export async function generateHash(password) {
   return sha256(password);
 }
 
+<<<<<<< HEAD
 // Dev-only escape hatch
+=======
+// Dev-only escape hatch — never available in production builds
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
 if (import.meta.env.DEV) {
   window.__forceLogin = () => {
     const token = buildToken('admin');

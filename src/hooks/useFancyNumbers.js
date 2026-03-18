@@ -36,7 +36,14 @@ export function useFancyNumbers() {
 
         let numsData = await numRes.json();
 
+<<<<<<< HEAD
         // Filter out draft/hidden numbers and expire old offers
+=======
+        // Handle both plain array and {data, total} API response formats
+        if (!Array.isArray(numsData)) numsData = numsData?.data || [];
+
+        // Automatically expire old offers, and filter out draft/hidden numbers
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
         const now = new Date();
         numsData = numsData.filter(n => n.visibility_status !== '0' && n.visibility_status !== 0).map(n => {
           if (n.offer_end_date && new Date(n.offer_end_date) < now) {

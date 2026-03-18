@@ -1,10 +1,24 @@
 <?php
 /**
  * Dynamic REST API — Fancy Number Marketplace
+<<<<<<< HEAD
  * VERSION 5.0: 5-Category System + Auto-Generation Engine
  *
  * Categories: 1=Diamond, 2=Platinum, 3=Gold, 4=Silver, 5=Normal
  * Category derived from pattern_type only.
+=======
+ * VERSION 4.0: Performance + Security Upgrade
+ *
+ * NEW in v4.0:
+ *  - GET /table/stats     → Dashboard KPIs in <100ms (COUNT-based)
+ *  - GET /table/count     → Filtered count with server-side WHERE
+ *  - Server-side search   → ?search=786 (LIKE query on mobile_number)
+ *  - Server-side filters  → ?category=Gold&number_status=available&pattern_type=...
+ *  - Expanded field whitelist (all columns frontend uses)
+ *  - Expanded ORDER BY whitelist
+ *  - Column whitelist on handle_put / handle_post (prevents injection)
+ *  - Auth: no debug console.log, no window.__forceLogin bypass
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
  */
 
 header("Content-Type: application/json; charset=UTF-8");
@@ -65,6 +79,7 @@ try {
     exit;
 }
 
+<<<<<<< HEAD
 // ═══════════════════════════════════════════════════════════════════════════════
 // AUTO-GENERATION ENGINE — Pattern detection, VIP scoring, category from pattern
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -177,6 +192,8 @@ function auto_generate_fields(array $row): array {
 }
 
 
+=======
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
 // ── 4. Routing ────────────────────────────────────────────────────────────────
 $method     = $_SERVER['REQUEST_METHOD'];
 $path_info  = isset($_SERVER['PATH_INFO']) ? trim($_SERVER['PATH_INFO'], '/') : '';
@@ -195,7 +212,11 @@ $allowed_tables = [
 ];
 
 if (empty($table)) {
+<<<<<<< HEAD
     echo json_encode(["message" => "Fancy Number API v5.0", "tables" => $allowed_tables]);
+=======
+    echo json_encode(["message" => "Fancy Number API v4.0", "tables" => $allowed_tables]);
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
     exit;
 }
 
@@ -212,16 +233,23 @@ if (in_array($method, ['POST', 'PUT', 'PATCH'])) {
     $input = json_decode($raw, true) ?? [];
 }
 
+<<<<<<< HEAD
 // ── 7. Stats + Count Route Dispatch (GET) ─────────────────────────────────────
+=======
+// ── 7. NEW: Stats + Count Route Dispatch (GET) ────────────────────────────────
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
 if ($method === 'GET') {
     if ($action_or_id === 'stats') {
         handle_stats($pdo, $table);
         exit;
     }
+<<<<<<< HEAD
     if ($action_or_id === 'pattern-stats') {
         handle_pattern_stats($pdo, $table);
         exit;
     }
+=======
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
     if ($action_or_id === 'count') {
         handle_count($pdo, $table);
         exit;
@@ -263,15 +291,31 @@ switch ($method) {
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
+<<<<<<< HEAD
 // STATS + COUNT CONTROLLERS
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function handle_stats($pdo, $table) {
     if ($table !== 'wp_fn_numbers') {
+=======
+// NEW: STATS + COUNT CONTROLLERS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * GET /wp_fn_numbers/stats
+ * Returns aggregate counts for Dashboard KPIs in <100ms
+ * Single query, no data transfer — just counts
+ */
+function handle_stats($pdo, $table) {
+    // Only allow stats on tables that have the expected columns
+    $allowed_stats_tables = ['wp_fn_numbers', 'wp_fn_draft_numbers'];
+    if (!in_array($table, $allowed_stats_tables)) {
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
         echo json_encode(["error" => "Stats not available for this table"]);
         return;
     }
 
+<<<<<<< HEAD
     $groupBy = $_GET['group_by'] ?? null;
 
     try {
@@ -307,6 +351,25 @@ function handle_stats($pdo, $table) {
         ");
         $result = $stmt->fetch();
         foreach ($result as $k => $v) { $result[$k] = (float)$v; }
+=======
+    try {
+        $stmt = $pdo->query("
+            SELECT
+                COUNT(*) as total,
+                SUM(CASE WHEN `visibility_status` = 1 THEN 1 ELSE 0 END) as visible,
+                SUM(CASE WHEN `number_status` = 'available' AND `visibility_status` = 1 THEN 1 ELSE 0 END) as available,
+                SUM(CASE WHEN `number_status` = 'sold' THEN 1 ELSE 0 END) as sold,
+                SUM(CASE WHEN `number_status` = 'booked' THEN 1 ELSE 0 END) as booked,
+                SUM(CASE WHEN `offer_price` IS NOT NULL AND `offer_price` > 0 AND `visibility_status` = 1 THEN 1 ELSE 0 END) as on_offer,
+                SUM(CASE WHEN `base_price` > 50000 AND `visibility_status` = 1 THEN 1 ELSE 0 END) as premium
+            FROM `$table`
+        ");
+        $result = $stmt->fetch();
+        // Ensure all values are integers (not null strings)
+        foreach ($result as $k => $v) {
+            $result[$k] = (int)$v;
+        }
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
         echo json_encode(["success" => true, "stats" => $result]);
     } catch (Exception $e) {
         http_response_code(500);
@@ -314,6 +377,7 @@ function handle_stats($pdo, $table) {
     }
 }
 
+<<<<<<< HEAD
 function handle_pattern_stats($pdo, $table) {
     if (!in_array($table, ['wp_fn_numbers', 'wp_fn_draft_numbers'])) {
         echo json_encode(["success" => false, "error" => "Not supported"]);
@@ -351,6 +415,30 @@ function handle_pattern_stats($pdo, $table) {
 
 function handle_count($pdo, $table) {
     list($conditions, $params) = build_where_from_get();
+=======
+/**
+ * GET /wp_fn_numbers/count?category=Gold&number_status=available&visibility_status=1
+ * Returns filtered count. Used by Inventory/Draft KPI cards.
+ */
+function handle_count($pdo, $table) {
+    $conditions = [];
+    $params = [];
+    $allowed_filters = [
+        'visibility_status', 'number_status', 'category',
+        'pattern_type', 'inventory_source', 'number_type'
+    ];
+    foreach ($allowed_filters as $f) {
+        if (isset($_GET[$f])) {
+            $conditions[] = "`$f` = ?";
+            $params[] = $_GET[$f];
+        }
+    }
+    // Search filter
+    if (!empty($_GET['search'])) {
+        $conditions[] = '`mobile_number` LIKE ?';
+        $params[] = '%' . $_GET['search'] . '%';
+    }
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
 
     $where = $conditions ? 'WHERE ' . implode(' AND ', $conditions) : '';
 
@@ -367,7 +455,11 @@ function handle_count($pdo, $table) {
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
+<<<<<<< HEAD
 // BULK CONTROLLERS
+=======
+// BULK CONTROLLERS (unchanged logic, same as v3.1)
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function handle_bulk_lookup($pdo, $input) {
@@ -451,26 +543,36 @@ function handle_bulk_insert($pdo, $target, $input) {
         echo json_encode(["success" => true, "inserted" => 0, "inserted_ids" => []]);
         return;
     }
+<<<<<<< HEAD
     // Fetch actual DB columns once to prevent crashes
     $stmtCols = $pdo->query("DESCRIBE `$target`");
     $dbCols = array_column($stmtCols->fetchAll(PDO::FETCH_ASSOC), 'Field');
 
+=======
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
     try {
         $pdo->beginTransaction();
         $totalInserted = 0;
         $allInsertedIds = [];
 
         foreach (array_chunk($records, 500) as $chunk) {
+<<<<<<< HEAD
             // Auto-generate fields for every row
             $chunk = array_map('auto_generate_fields', $chunk);
 
+=======
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
             $allKeys = [];
             foreach ($chunk as $row) {
                 $allKeys = array_unique(array_merge($allKeys, array_keys($row)));
             }
+<<<<<<< HEAD
             $allKeys = array_values(array_filter($allKeys, function($k) use ($dbCols) {
                 return $k !== 'number_id' && substr($k, 0, 1) !== '_' && in_array($k, $dbCols, true);
             }));
+=======
+            $allKeys = array_values(array_filter($allKeys, fn($k) => $k !== 'number_id' && substr($k, 0, 1) !== '_'));
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
             if (empty($allKeys)) continue;
 
             $colStr = '`' . implode('`, `', $allKeys) . '`';
@@ -485,7 +587,11 @@ function handle_bulk_insert($pdo, $target, $input) {
                 }
             }
 
+<<<<<<< HEAD
             // UPSERT Logic
+=======
+            // UPSERT Logic: Update all columns on duplicate key (except primary/unique keys)
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
             $updateSets = [];
             foreach ($allKeys as $k) {
                 if ($k === 'number_id' || $k === 'mobile_number') continue;
@@ -534,6 +640,7 @@ function handle_bulk_update($pdo, $target, $input) {
     }
 
     $allowed = [
+<<<<<<< HEAD
         'number_type','number_category',
         'pattern_type','pattern_name',
         'prefix','suffix','digit_sum','repeat_count',
@@ -544,6 +651,15 @@ function handle_bulk_update($pdo, $target, $input) {
         'number_status','visibility_status',
         'dealer_id','inventory_source','remarks',
         'batch_file_name','upload_batch_id',
+=======
+        'base_price', 'offer_price', 'number_status', 'category',
+        'pattern_type', 'visibility_status', 'remarks',
+        'offer_tag', 'discount_percent', 'offer_label',
+        'inventory_source', 'number_type',
+        'primary_incharge_name', 'primary_incharge_phone',
+        'secondary_incharge_name', 'secondary_incharge_phone',
+        'whatsapp_group_name',
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
     ];
 
     $sets   = [];
@@ -579,6 +695,7 @@ function handle_bulk_update($pdo, $target, $input) {
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
+<<<<<<< HEAD
 // WHERE BUILDER — shared by handle_get, handle_count
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -627,6 +744,22 @@ function build_where_from_get(): array {
 // STANDARD CRUD HELPERS
 // ═══════════════════════════════════════════════════════════════════════════════
 
+=======
+// STANDARD CRUD HELPERS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * GET /table          → list with server-side search, filter, sort, pagination
+ * GET /table/:id      → single record
+ *
+ * Supports:
+ *   ?fields=col1,col2   ?limit=N   ?offset=N
+ *   ?order=col          ?dir=asc|desc
+ *   ?search=786         (LIKE on mobile_number)
+ *   ?visibility_status=1  ?category=Gold  ?number_status=available
+ *   ?pattern_type=...   ?inventory_source=...
+ */
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
 function handle_get($pdo, $table, $id) {
     $pk     = get_pk_name($table);
     $fields = build_field_list($table);
@@ -642,7 +775,32 @@ function handle_get($pdo, $table, $id) {
     $limit  = min((int)($_GET['limit'] ?? 100), 100000);
     $offset = max((int)($_GET['offset'] ?? 0), 0);
 
+<<<<<<< HEAD
     list($conditions, $params) = build_where_from_get();
+=======
+    // WHERE clauses — expanded with server-side filters
+    $conditions = [];
+    $params     = [];
+
+    // Standard column filters
+    $allowed_filters = [
+        'visibility_status', 'number_status', 'category',
+        'pattern_type', 'inventory_source', 'number_type'
+    ];
+    foreach ($allowed_filters as $f) {
+        if (isset($_GET[$f])) {
+            $conditions[] = "`$f` = ?";
+            $params[] = $_GET[$f];
+        }
+    }
+
+    // NEW: Server-side search on mobile_number
+    if (!empty($_GET['search'])) {
+        $conditions[] = '`mobile_number` LIKE ?';
+        $params[] = '%' . $_GET['search'] . '%';
+    }
+
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
     $where = $conditions ? 'WHERE ' . implode(' AND ', $conditions) : '';
 
     // ORDER BY — expanded whitelist
@@ -652,8 +810,13 @@ function handle_get($pdo, $table, $id) {
         $orderWhitelist = [
             'number_id', 'mobile_number', 'base_price', 'offer_price',
             'created_at', 'updated_at', 'started_at', 'finished_at',
+<<<<<<< HEAD
             'upload_time', 'batch_id', 'number_category', 'number_status',
             'pattern_type', 'vip_score', 'dealer_id',
+=======
+            'upload_time', 'batch_id', 'category', 'number_status',
+            'pattern_type',
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
         ];
         $req = trim($_GET['order']);
         if (in_array($req, $orderWhitelist, true)) $orderCol = $req;
@@ -669,6 +832,11 @@ function handle_get($pdo, $table, $id) {
     $stmt->execute($params);
     $rows = $stmt->fetchAll();
 
+<<<<<<< HEAD
+=======
+    // BACKWARD COMPATIBLE: return plain array by default (v3.1 behavior)
+    // Only return {data, total} when ?format=paginated is explicitly requested
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
     if (!empty($_GET['format']) && $_GET['format'] === 'paginated') {
         $countStmt = $pdo->prepare("SELECT COUNT(*) as total FROM `$table` $where");
         $countStmt->execute($params);
@@ -680,10 +848,15 @@ function handle_get($pdo, $table, $id) {
             "offset" => $offset,
         ]);
     } else {
+<<<<<<< HEAD
+=======
+        // Default: plain array — keeps customer frontend and all existing code working
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
         echo json_encode($rows);
     }
 }
 
+<<<<<<< HEAD
 function build_field_list($table) {
     $tableFields = [
         'wp_fn_numbers' => [
@@ -716,6 +889,33 @@ function build_field_list($table) {
             'inventory_source','remarks','batch_file_name',
             'created_at','updated_at',
             'draft_reason','draft_status','drafted_by','drafted_at',
+=======
+/**
+ * Build safe SELECT field list for a given table.
+ * EXPANDED: includes all columns the frontend actually uses
+ */
+function build_field_list($table) {
+    $tableFields = [
+        'wp_fn_numbers' => [
+            'number_id', 'mobile_number', 'base_price', 'offer_price',
+            'number_status', 'category', 'pattern_type', 'inventory_source',
+            'visibility_status', 'offer_tag', 'discount_percent', 'discount_percentage',
+            'remarks', 'number_type', 'created_at', 'updated_at',
+            'primary_incharge_name', 'primary_incharge_phone',
+            'secondary_incharge_name', 'secondary_incharge_phone',
+            'whatsapp_group_name', 'offer_start_date', 'offer_end_date',
+            'priority_rank', 'digit_sum', 'repeat_count', 'prefix', 'suffix',
+            'category_name', 'pattern_name', 'vip_score', 'number_category',
+        ],
+        'wp_fn_draft_numbers' => [
+            'number_id', 'mobile_number', 'base_price', 'offer_price',
+            'number_status', 'category', 'number_category', 'pattern_type',
+            'inventory_source', 'visibility_status', 'remarks', 'number_type',
+            'created_at', 'updated_at',
+            'primary_incharge_name', 'primary_incharge_phone',
+            'secondary_incharge_name', 'secondary_incharge_phone',
+            'whatsapp_group_name', 'digit_sum', 'repeat_count', 'prefix', 'suffix',
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
         ],
         'wp_fn_background_jobs' => [
             'id', 'job_id', 'file_name', 'operation', 'status', 'total',
@@ -742,6 +942,13 @@ function build_field_list($table) {
     return $clean ? '`' . implode('`, `', $clean) . '`' : '*';
 }
 
+<<<<<<< HEAD
+=======
+/**
+ * POST /table — with column whitelist
+ * v4.0: sanitizes column names to prevent injection
+ */
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
 function handle_post($pdo, $table, $input) {
     if (empty($input)) {
         http_response_code(400);
@@ -749,6 +956,10 @@ function handle_post($pdo, $table, $input) {
         return;
     }
 
+<<<<<<< HEAD
+=======
+    // Sanitize column names: only allow alphanumeric + underscores
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
     $safeInput = [];
     foreach ($input as $k => $v) {
         if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $k)) {
@@ -773,6 +984,13 @@ function handle_post($pdo, $table, $input) {
     }
 }
 
+<<<<<<< HEAD
+=======
+/**
+ * PUT/PATCH /table/:id — with column whitelist
+ * v4.0: sanitizes column names to prevent injection
+ */
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
 function handle_put($pdo, $table, $id, $input) {
     if (!$id || empty($input)) {
         http_response_code(400);
@@ -785,6 +1003,10 @@ function handle_put($pdo, $table, $id, $input) {
     $vals = [];
 
     foreach ($input as $k => $v) {
+<<<<<<< HEAD
+=======
+        // Only allow safe column names
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
         if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $k)) {
             $sets[] = "`$k` = ?";
             $vals[] = $v;
@@ -810,6 +1032,12 @@ function handle_put($pdo, $table, $id, $input) {
     }
 }
 
+<<<<<<< HEAD
+=======
+/**
+ * DELETE /table/:id
+ */
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
 function handle_delete($pdo, $table, $id) {
     if (!$id) {
         http_response_code(400);

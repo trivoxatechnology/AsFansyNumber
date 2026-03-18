@@ -46,20 +46,38 @@ export function ImportProvider({ children }) {
   useEffect(() => {
     mountedRef.current = true;
     fetchDbJobs();
+<<<<<<< HEAD
     return () => { mountedRef.current = false; };
   }, [fetchDbJobs]);
+=======
+    const timer = setInterval(() => {
+      if (jobs.some(j => j.status === 'running') || dbJobs.some(j => j.status === 'running')) {
+        fetchDbJobs();
+      }
+    }, 15000);
+    return () => { mountedRef.current = false; clearInterval(timer); };
+  }, [fetchDbJobs, jobs, dbJobs]);
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
 
   const hasActiveJobs = jobs.some(j => j.status === 'running') || dbJobs.some(j => j.status === 'running');
 
   const [parseSession, setParseSession] = useState({
     rows: [], step: 1, fileName: '', isParsing: false, parseProgress: '',
+<<<<<<< HEAD
     operatorName: localStorage.getItem('ag_admin_username') || '',
+=======
+    operatorName: localStorage.getItem('adminUsername') || '',
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
   });
 
   const updateParseSession = useCallback((patch) => setParseSession(prev => ({ ...prev, ...patch })), []);
   const clearParseSession = useCallback(() => setParseSession({
     rows: [], step: 1, fileName: '', isParsing: false, parseProgress: '',
+<<<<<<< HEAD
     operatorName: localStorage.getItem('ag_admin_username') || '',
+=======
+    operatorName: localStorage.getItem('adminUsername') || '',
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
   }), []);
 
   const updateJob = useCallback((id, patch) => {
@@ -80,6 +98,7 @@ export function ImportProvider({ children }) {
       await fetchWithAuth(`${API_BASE}/wp_fn_background_jobs/${jobId}`, { method: 'DELETE' });
     } catch (e) { /* ignore */ }
   }, []);
+<<<<<<< HEAD
 
   // Cancel a running job via AbortController
   const cancelJob = useCallback(async (id) => {
@@ -118,6 +137,45 @@ export function ImportProvider({ children }) {
       let processed = 0, lastDbUpdate = 0;
       const CHUNK_SIZE = 1000;
       const tableName = importDestination === 'draft' ? 'wp_fn_draft_numbers' : 'wp_fn_numbers';
+=======
+
+  // Cancel a running job via AbortController
+  const cancelJob = useCallback(async (id) => {
+    const ctrl = abortControllers.current[id];
+    if (ctrl) {
+      ctrl.abort();
+      delete abortControllers.current[id];
+    }
+    updateJob(id, { status: 'done', phase: 'Cancelled by user' });
+    await dbJobUpdate(id, { status: 'cancelled' });
+    fetchDbJobs();
+  }, [updateJob, fetchDbJobs]);
+
+  // Force-dismiss a stuck DB job (mark as cancelled in DB)
+  const forceStopDbJob = useCallback(async (jobId) => {
+    await dbJobUpdate(jobId, { status: 'cancelled' });
+    fetchDbJobs();
+  }, [fetchDbJobs]);
+
+  const runBulkImport = useCallback(async ({
+    rows, fileName, importDestination, operatorName, cleanRow
+  }) => {
+    const id = `bulk_imp_${Date.now()}`;
+    const validRows = rows.filter(r => r._status === 'valid');
+    const total = validRows.length;
+    const finalOperator = operatorName || localStorage.getItem('adminUsername') || 'Admin';
+
+    // Create AbortController for this job
+    const ctrl = new AbortController();
+    abortControllers.current[id] = ctrl;
+
+    setJobs(prev => [...prev, { id, label: fileName || 'Import', status: 'running', current: 0, total, phase: 'Starting...' }]);
+    await dbJobCreate(id, fileName || 'Import', 'Bulk Import', total, finalOperator);
+
+    (async () => {
+      let processed = 0, lastDbUpdate = 0;
+      const CHUNK_SIZE = 1000;
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
       const endpoint = importDestination === 'draft' ? `${API_BASE}/wp_fn_draft_numbers/bulk-insert` : `${API_BASE}/wp_fn_numbers/bulk-insert`;
 
       try {
@@ -126,6 +184,7 @@ export function ImportProvider({ children }) {
           if (ctrl.signal.aborted) {
             updateJob(id, { status: 'done', phase: `Cancelled at ${processed}/${total}` });
             await dbJobUpdate(id, { status: 'cancelled', processed });
+<<<<<<< HEAD
             await writeOperationLog({
               fileName: fileName || 'Import',
               operationType: 'imported',
@@ -135,10 +194,13 @@ export function ImportProvider({ children }) {
               status: 'cancelled',
               adminName: finalOperator,
             });
+=======
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
             return;
           }
 
           const chunk = validRows.slice(i, i + CHUNK_SIZE).map(r => cleanRow(r));
+<<<<<<< HEAD
           console.log(`[Import] Sending chunk ${i / CHUNK_SIZE + 1} (${chunk.length} rows) to ${endpoint}`);
           
           let res;
@@ -165,6 +227,17 @@ export function ImportProvider({ children }) {
 
           const resData = await res.json().catch(() => null);
           console.log(`[Import] Chunk ${i / CHUNK_SIZE + 1} result:`, resData);
+=======
+          const res = await fetchWithAuth(endpoint, {
+            method: 'POST',
+            body: JSON.stringify({ records: chunk }),
+            signal: ctrl.signal,
+          });
+          if (!res || !res.ok) {
+            const errText = await (res ? res.text() : Promise.resolve('Unknown Network Error'));
+            throw new Error(`API Error: ${errText}`);
+          }
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
           processed += chunk.length;
           updateJob(id, { current: processed, phase: `Importing ${processed}/${total}...` });
           if (Date.now() - lastDbUpdate > 3000) {
@@ -174,6 +247,7 @@ export function ImportProvider({ children }) {
         }
         await dbJobUpdate(id, { status: 'done', processed: total });
         updateJob(id, { status: 'done', current: total, phase: 'Complete' });
+<<<<<<< HEAD
         await writeOperationLog({
           fileName: fileName || 'Import',
           operationType: 'imported',
@@ -183,6 +257,8 @@ export function ImportProvider({ children }) {
           status: 'completed',
           adminName: finalOperator,
         });
+=======
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
       } catch (err) {
         if (err?.name === 'AbortError') {
           updateJob(id, { status: 'done', phase: `Cancelled at ${processed}/${total}` });
@@ -191,6 +267,7 @@ export function ImportProvider({ children }) {
           const errMsg = err?.message || 'Unknown error';
           await dbJobUpdate(id, { status: 'failed', processed, phase: 'Error: ' + errMsg });
           updateJob(id, { status: 'done', phase: 'Error: ' + errMsg });
+<<<<<<< HEAD
           await writeOperationLog({
             fileName: fileName || 'Import',
             operationType: 'imported',
@@ -200,6 +277,8 @@ export function ImportProvider({ children }) {
             status: 'error',
             adminName: finalOperator,
           });
+=======
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
         }
       }
     })();
@@ -208,7 +287,11 @@ export function ImportProvider({ children }) {
   const runDeleteOperation = useCallback(async ({ toDelete, fileName, destination, operatorName }) => {
     const id = `bulk_del_${Date.now()}`;
     const total = toDelete.length;
+<<<<<<< HEAD
     const finalOperator = operatorName || localStorage.getItem('ag_admin_username') || 'Admin';
+=======
+    const finalOperator = operatorName || localStorage.getItem('adminUsername') || 'Admin';
+>>>>>>> b50d41b75f2cbb11c534bbd4982aade437c85e7f
 
     const ctrl = new AbortController();
     abortControllers.current[id] = ctrl;
