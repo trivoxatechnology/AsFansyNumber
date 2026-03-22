@@ -1,0 +1,26 @@
+mobile_number,base_price,offer_price,number_status,category,pattern_type,remarks
+9999999999,500000,450000,available,1,Mirror,Diamond Mirror
+9898989898,350000,320000,available,1,XYXYXY,Diamond Repeating Match
+7867867860,180000,,available,2,786,Platinum Lucky
+1234567890,200000,185000,available,2,Sequential,Platinum Sequential
+9444444449,150000,,available,3,Repeating,Gold Single Repeating
+9999900000,120000,110000,available,3,Mirror,Gold Double Half
+9888878888,85000,,available,4,Numerology,Silver Numerology Match
+9111192222,65000,60000,available,4,ABAB-XYXY,Silver Custom Double
+8000000008,50000,,available,5,Mirror,Bronze Edge Match
+9333333339,45000,,available,5,Repeating,Bronze Special
+9876598765,125000,,available,6,Normal,Premium Clean Match
+9050000005,15000,,available,6,Normal,Standard Daily Driver
+9898000001,85000,80000,available,7,Couple,Matching Pair One
+9898000002,85000,80000,available,7,Couple,Matching Pair Two
+9800000001,55000,,available,7,Couple,Consecutive Pair Alpha
+9800000002,55000,,available,7,Couple,Consecutive Pair Beta
+8800088000,200000,,available,8,Business,Corporate Block Alpha
+8800088111,150000,,available,8,Business,Corporate Block Beta
+8800088222,150000,,available,8,Business,Corporate Block Delta
+9191919191,120000,,available,1,XYXYXY,Diamond XY
+7860000786,90000,85000,available,3,786,Gold 786 Wrap
+0000000000,1000000,,available,1,Mirror,Supreme Diamond
+1231231234,45000,,available,5,Repeating,Bronze Group
+9555555559,75000,,available,4,Mirror,Silver Center Pent
+9696969696,250000,230000,available,2,XYXYXY,Platinum XY

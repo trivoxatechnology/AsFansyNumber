@@ -115,88 +115,84 @@ export function ImportProvider({ children }) {
     await dbJobCreate(id, fileName || 'Import', 'Bulk Import', total, finalOperator);
 
     (async () => {
-      let processed = 0, lastDbUpdate = 0;
-      const CHUNK_SIZE = 1000;
-      const tableName = importDestination === 'draft' ? 'wp_fn_draft_numbers' : 'wp_fn_numbers';
-      const endpoint = importDestination === 'draft' ? `${API_BASE}/wp_fn_draft_numbers/bulk-insert` : `${API_BASE}/wp_fn_numbers/bulk-insert`;
-
       try {
-        for (let i = 0; i < validRows.length; i += CHUNK_SIZE) {
-          // Check if cancelled
-          if (ctrl.signal.aborted) {
-            updateJob(id, { status: 'done', phase: `Cancelled at ${processed}/${total}` });
-            await dbJobUpdate(id, { status: 'cancelled', processed });
-            await writeOperationLog({
-              fileName: fileName || 'Import',
-              operationType: 'imported',
-              operationData: `Cancelled at ${processed}/${total}`,
-              totalRecords: processed,
-              tableName,
-              status: 'cancelled',
-              adminName: finalOperator,
-            });
-            return;
-          }
-
-          const chunk = validRows.slice(i, i + CHUNK_SIZE).map(r => cleanRow(r));
-          console.log(`[Import] Sending chunk ${i / CHUNK_SIZE + 1} (${chunk.length} rows) to ${endpoint}`);
-          
-          let res;
-          try {
-            res = await fetchWithAuth(endpoint, {
-              method: 'POST',
-              body: JSON.stringify({ records: chunk }),
-              signal: ctrl.signal,
-            });
-          } catch (fetchErr) {
-            console.error('[Import] Network error:', fetchErr);
-            throw new Error(`Network Error: ${fetchErr.message} — check if API server is reachable`);
-          }
-
-          if (!res) {
-            throw new Error('Auth failed (401) — please re-login and try again');
-          }
-
-          if (!res.ok) {
-            const errBody = await res.text().catch(() => 'Could not read response');
-            console.error(`[Import] HTTP ${res.status}:`, errBody.slice(0, 500));
-            throw new Error(`HTTP ${res.status}: ${errBody.slice(0, 200)}`);
-          }
-
-          const resData = await res.json().catch(() => null);
-          console.log(`[Import] Chunk ${i / CHUNK_SIZE + 1} result:`, resData);
-          processed += chunk.length;
-          updateJob(id, { current: processed, phase: `Importing ${processed}/${total}...` });
-          if (Date.now() - lastDbUpdate > 3000) {
-            lastDbUpdate = Date.now();
-            await dbJobUpdate(id, { processed, status: 'running' });
-          }
+        const cleanedRows = validRows.map(r => cleanRow(r));
+        const formData = new FormData();
+        formData.append('json_data', JSON.stringify(cleanedRows));
+        formData.append('file_name', fileName || 'Import');
+        formData.append('uploaded_by', finalOperator);
+        if (importDestination === 'draft') {
+            formData.append('target', 'draft');
         }
-        await dbJobUpdate(id, { status: 'done', processed: total });
-        updateJob(id, { status: 'done', current: total, phase: 'Complete' });
+
+        updateJob(id, { phase: 'Processing on server...' });
+
+        let res;
+        try {
+          res = await fetchWithAuth(`${API_BASE}/upload-process`, {
+            method: 'POST',
+            body: formData,
+            signal: ctrl.signal,
+          });
+        } catch (fetchErr) {
+          console.error('[Import] Network error:', fetchErr);
+          throw new Error(`Network Error: ${fetchErr.message} — check if API server is reachable`);
+        }
+
+        if (!res) throw new Error('Auth failed (401) — please re-login and try again');
+
+        if (!res.ok && res.status !== 200) {
+          const errBody = await res.text().catch(() => 'Could not read response');
+          console.error(`[Import] HTTP ${res.status}:`, errBody.slice(0, 500));
+          throw new Error(`HTTP ${res.status}: ${errBody.slice(0, 200)}`);
+        }
+
+        const rawText = await res.text();
+        let result;
+        try {
+            result = JSON.parse(rawText);
+        } catch(e) {
+            const cleanText = rawText.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim();
+            throw new Error(`PHP Fatal Error: ${cleanText.substring(0, 250)}`);
+        }
+
+        if (!result.success) throw new Error(result.error || 'Upload failed');
+
+        const s = result.summary;
+        const phaseSummary = [
+          `${s.total_inserted} inserted`,
+          s.couple_count > 0 ? `${s.couple_count} couples (${s.couple_numbers} numbers)` : null,
+          s.group_count > 0 ? `${s.group_count} groups (${s.group_numbers} numbers)` : null,
+          s.flagged > 0 ? `${s.flagged} flagged` : null,
+          s.errors > 0 ? `${s.errors} errors` : null,
+        ].filter(Boolean).join(', ');
+
+        await dbJobUpdate(id, { status: 'done', processed: s.total_inserted });
+        updateJob(id, { status: 'done', current: total, phase: `Complete: ${phaseSummary}`, serverResult: result });
         await writeOperationLog({
           fileName: fileName || 'Import',
           operationType: 'imported',
-          operationData: `Imported ${total} records to ${tableName}`,
-          totalRecords: total,
-          tableName,
+          operationData: `Imported ${s.total_inserted} records. Flags: ${s.flagged}, Errors: ${s.errors}`,
+          totalRecords: s.total_inserted,
+          tableName: importDestination === 'draft' ? 'wp_fn_draft_numbers (Plus Couple/Group)' : 'wp_fn_numbers (Plus Couple/Group)',
           status: 'completed',
           adminName: finalOperator,
         });
+
       } catch (err) {
         if (err?.name === 'AbortError') {
-          updateJob(id, { status: 'done', phase: `Cancelled at ${processed}/${total}` });
-          await dbJobUpdate(id, { status: 'cancelled', processed });
+          updateJob(id, { status: 'done', phase: `Cancelled` });
+          await dbJobUpdate(id, { status: 'cancelled', processed: 0 });
         } else {
           const errMsg = err?.message || 'Unknown error';
-          await dbJobUpdate(id, { status: 'failed', processed, phase: 'Error: ' + errMsg });
+          await dbJobUpdate(id, { status: 'failed', processed: 0, phase: 'Error: ' + errMsg });
           updateJob(id, { status: 'done', phase: 'Error: ' + errMsg });
           await writeOperationLog({
             fileName: fileName || 'Import',
             operationType: 'imported',
-            operationData: `Error: ${errMsg} (processed ${processed}/${total})`,
-            totalRecords: processed,
-            tableName,
+            operationData: `Error: ${errMsg}`,
+            totalRecords: 0,
+            tableName: importDestination === 'draft' ? 'wp_fn_draft_numbers' : 'wp_fn_numbers',
             status: 'error',
             adminName: finalOperator,
           });
@@ -204,6 +200,95 @@ export function ImportProvider({ children }) {
       }
     })();
   }, [updateJob]);
+
+  // ── Server-Side Upload Processor ──────────────────────────────────────────
+  // Sends the raw file to the PHP upload-process endpoint.
+  // The server handles parsing, validation, bucketing, dedup, and insertion.
+  const runServerUpload = useCallback(async ({ file, operatorName }) => {
+    const id = `srv_upload_${Date.now()}`;
+    const finalOperator = operatorName || localStorage.getItem('ag_admin_username') || 'Admin';
+
+    const ctrl = new AbortController();
+    abortControllers.current[id] = ctrl;
+
+    setJobs(prev => [...prev, {
+      id, label: file.name || 'Upload', status: 'running',
+      current: 0, total: 1, phase: 'Uploading file to server...'
+    }]);
+    await dbJobCreate(id, file.name || 'Upload', 'Server Upload', 1, finalOperator);
+
+    (async () => {
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('uploaded_by', finalOperator);
+
+        updateJob(id, { phase: 'Processing on server...' });
+
+        const token = localStorage.getItem('ag_admin_token') || '';
+        const res = await fetch(`${API_BASE}/upload-process`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+          body: formData,
+          signal: ctrl.signal,
+        });
+
+        if (!res || !res.ok) {
+          const errText = await (res ? res.text() : Promise.resolve('Network Error'));
+          throw new Error(`HTTP ${res?.status}: ${errText}`);
+        }
+
+        const result = await res.json();
+        if (!result.success) throw new Error(result.error || 'Upload failed');
+
+        const s = result.summary;
+        const phaseSummary = [
+          `${s.total_inserted} inserted`,
+          s.couple_count > 0 ? `${s.couple_count} couples (${s.couple_numbers} numbers)` : null,
+          s.group_count > 0 ? `${s.group_count} groups (${s.group_numbers} numbers)` : null,
+          s.flagged > 0 ? `${s.flagged} flagged` : null,
+          s.errors > 0 ? `${s.errors} errors` : null,
+        ].filter(Boolean).join(', ');
+
+        updateJob(id, {
+          status: 'done', current: 1, total: 1,
+          phase: `Complete: ${phaseSummary}`,
+          serverResult: result,
+        });
+        await dbJobUpdate(id, { status: 'done', processed: s.total_inserted });
+        await writeOperationLog({
+          fileName: file.name,
+          operationType: 'server-upload',
+          operationData: phaseSummary,
+          totalRecords: s.total_inserted,
+          tableName: 'wp_fn_numbers',
+          status: 'complete',
+          adminName: finalOperator,
+        });
+        fetchDbJobs();
+      } catch (e) {
+        if (e?.name === 'AbortError') {
+          updateJob(id, { status: 'done', phase: 'Cancelled by user' });
+          await dbJobUpdate(id, { status: 'cancelled' });
+        } else {
+          const errMsg = e?.message || 'Unknown error';
+          updateJob(id, { status: 'done', phase: `Error: ${errMsg}` });
+          await dbJobUpdate(id, { status: 'error' });
+          await writeOperationLog({
+            fileName: file.name,
+            operationType: 'server-upload',
+            operationData: `Error: ${errMsg}`,
+            totalRecords: 0,
+            tableName: 'wp_fn_numbers',
+            status: 'error',
+            adminName: finalOperator,
+          });
+        }
+      }
+    })();
+
+    return id;
+  }, [updateJob, fetchDbJobs]);
 
   const runDeleteOperation = useCallback(async ({ toDelete, fileName, destination, operatorName }) => {
     const id = `bulk_del_${Date.now()}`;
@@ -258,7 +343,7 @@ export function ImportProvider({ children }) {
 
   return (
     <ImportContext.Provider value={{
-      jobs, dbJobs, hasActiveJobs, runBulkImport, runDeleteOperation, removeJob, removeDbJob,
+      jobs, dbJobs, hasActiveJobs, runBulkImport, runServerUpload, runDeleteOperation, removeJob, removeDbJob,
       cancelJob, forceStopDbJob,
       parseSession, updateParseSession, clearParseSession,
     }}>

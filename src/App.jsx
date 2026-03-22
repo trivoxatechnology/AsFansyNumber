@@ -1,118 +1,144 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Navbar from './components/Navbar';
 import Hero from './components/Hero';
-import Sidebar from './components/Sidebar';
 import NumberCard from './components/NumberCard';
+import CoupleCard from './components/CoupleCard';
+import GroupCard from './components/GroupCard';
 import CartModal from './components/CartModal';
 import Loader from './components/Loader';
+import AdPopup from './components/AdPopup';
 import { useFancyNumbers } from './hooks/useFancyNumbers';
-import { Ghost, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Ghost, Loader2, ChevronLeft, ChevronRight, LayoutGrid, List } from 'lucide-react';
 import './index.css';
 
 // ── Category / Pattern config ────────────────────────────────────────────────
 const CATEGORIES = [
-  { id: '1', label: '💎 Diamond',  color: '#0ea5e9', bg: 'linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%)', accent: '#0284c7' },
-  { id: '2', label: '💍 Platinum', color: '#8b5cf6', bg: 'linear-gradient(135deg, #ede9fe 0%, #ddd6fe 100%)', accent: '#7c3aed' },
-  { id: '3', label: '⭐ Gold',     color: '#d97706', bg: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)', accent: '#b45309' },
-  { id: '4', label: '🥈 Silver',   color: '#64748b', bg: 'linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%)', accent: '#475569' },
-  { id: '5', label: '📱 Normal',   color: '#6b7280', bg: 'linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%)', accent: '#4b5563' },
+  { id: '1', label: 'Diamond',  emoji: '💎', cls: 'diamond',  sub: 'Mirror · Palindrome · Full Symmetry · Hexa · Single Digit Repeating' },
+  { id: '2', label: 'Platinum', emoji: '💍', cls: 'platinum', sub: 'Penta · XYXYXY · Tetra · xyzxyz' },
+  { id: '3', label: 'Gold',     emoji: '⭐', cls: 'gold',     sub: '786 · Doubling · ABAB-XYXY · Numerology' },
+  { id: '4', label: 'Silver',   emoji: '🥈', cls: 'silver',   sub: 'Sequential · 000 Series · 13 Special · xyxy Pattern' },
+  { id: '5', label: 'Bronze',   emoji: '🥉', cls: 'bronze',   sub: 'Minimum Digit · Special Characters' },
+  { id: '7', label: 'Couple',   emoji: '👫', cls: 'couple',   sub: 'Matching Pairs · Consecutive Sequence Pairs' },
+  { id: '8', label: 'Business', emoji: '💼', cls: 'business', sub: 'Group Numbers · Corporate Series · Easy Recall' },
+  { id: '6', label: 'Normal',   emoji: '📱', cls: 'normal',   sub: 'Daily Use · Budget Friendly · Clean Numbers' },
 ];
 
 const PATTERNS = [
-  { type: 'Mirror',      label: '🪞 Mirror Numbers',      accent: '#0ea5e9' },
-  { type: 'Palindrome',  label: '🔄 Palindrome Numbers',  accent: '#8b5cf6' },
-  { type: 'Ladder Up',   label: '📈 Ladder Up',            accent: '#10b981' },
-  { type: 'Ladder Down', label: '📉 Ladder Down',          accent: '#f59e0b' },
-  { type: 'Repeating',   label: '🔁 Repeating Numbers',   accent: '#ef4444' },
-  { type: 'Double Pair', label: '👯 Double Pair',          accent: '#ec4899' },
-  { type: 'Triple',      label: '3️⃣ Triple Digit',        accent: '#14b8a6' },
-  { type: 'Sequential',  label: '🔢 Sequential',          accent: '#6366f1' },
+  { type: 'Mirror',      label: 'Mirror Numbers' },
+  { type: '786',         label: '🕌 786 Lucky' },
+  { type: 'Numerology',  label: '🔢 Numerology' },
+  { type: 'Repeating',   label: 'Repeating' },
+  { type: 'XYXYXY',      label: 'XYXYXY' },
 ];
 
 // ── Horizontal scroll row ────────────────────────────────────────────────────
-function ScrollRow({ title, items, accent, isItemInCart, onToggleCart }) {
+function ScrollRow({ cat, items, isItemInCart, onToggleCart, onSeeAll }) {
   const scrollRef = useRef(null);
-  if (!items || items.length === 0) return null;
-
+  
   const scroll = (dir) => {
     if (!scrollRef.current) return;
     scrollRef.current.scrollBy({ left: dir * 460, behavior: 'smooth' });
   };
 
   return (
-    <div style={{ marginBottom: '36px' }}>
-      <div style={rowStyles.header}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ ...rowStyles.accent, background: accent || 'var(--neon-green)' }} />
-          <h3 style={rowStyles.title}>{title}</h3>
-          <span style={rowStyles.count}>{items.length}</span>
+    <div id={`section-${cat.cls}`} className="section-row">
+      <div className="section-header">
+        <div className="section-icon" style={{ background: `var(--${cat.cls})`, color: '#000' }}>{cat.emoji}</div>
+        <div>
+          <div className="section-title" style={{ fontFamily: "var(--font-display)", fontSize: '28px', fontWeight: 600, letterSpacing: '0.06em' }}>{cat.label} Numbers</div>
+          <div className="section-sub" style={{ fontFamily: "var(--font-body)", fontSize: '13px', fontWeight: 300 }}>{cat.sub}</div>
         </div>
-        <div style={{ display: 'flex', gap: '6px' }}>
-          <button style={rowStyles.arrowBtn} onClick={() => scroll(-1)}><ChevronLeft size={18} /></button>
-          <button style={rowStyles.arrowBtn} onClick={() => scroll(1)}><ChevronRight size={18} /></button>
-        </div>
+        <span className="section-count" style={{ fontFamily: "var(--font-body)", fontSize: '12px', fontWeight: 500 }}>{items.length.toLocaleString('en-IN')} numbers</span>
+        <button className="see-all" onClick={() => onSeeAll(cat.id)} style={{ fontFamily: "var(--font-heading)", fontStyle: 'italic', fontWeight: 400, fontSize: '14px', background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer' }}>Explore All →</button>
       </div>
-      <div ref={scrollRef} style={rowStyles.scrollContainer}>
-        {items.slice(0, 50).map(item => (
-          <NumberCard
-            key={item.number_id || item.id}
-            item={item}
-            compact
-            inCart={isItemInCart(item.number_id || item.id)}
-            onToggleCart={onToggleCart}
-          />
-        ))}
-        {items.length > 50 && (
-          <div style={rowStyles.moreBadge}>
-            +{items.length - 50} more
-          </div>
-        )}
+      
+      <div style={rowStyles.scrollWrapper}>
+        <button style={rowStyles.arrowBtnLeft} onClick={() => scroll(-1)}><ChevronLeft size={18} /></button>
+        <div ref={scrollRef} className="cards-grid" style={rowStyles.scrollContainer}>
+          {items.slice(0, 24).map(item => {
+            if (item.is_bundle) {
+              if (item.bundle_type === 'couple') {
+                return (
+                  <CoupleCard
+                    key={`couple-${item.couple_id}`}
+                    item={item}
+                    isItemInCart={isItemInCart}
+                    onToggleCart={onToggleCart}
+                  />
+                );
+              }
+              if (item.bundle_type === 'group') {
+                return (
+                  <GroupCard
+                    key={`group-${item.group_id}`}
+                    item={item}
+                    isItemInCart={isItemInCart}
+                    onToggleCart={onToggleCart}
+                  />
+                );
+              }
+            }
+            return (
+              <NumberCard
+                key={item.number_id || item.id}
+                item={item}
+                compact
+                inCart={isItemInCart(item.number_id || item.id)}
+                onToggleCart={onToggleCart}
+              />
+            );
+          })}
+          {items.length > 24 && (
+            <div style={rowStyles.moreBadge} onClick={() => onSeeAll(cat.id)}>
+              Explore All {items.length} <br/> {cat.label} Numbers
+            </div>
+          )}
+        </div>
+        <button style={rowStyles.arrowBtnRight} onClick={() => scroll(1)}><ChevronRight size={18} /></button>
       </div>
     </div>
   );
 }
 
+import { getHomepageRows } from './api/client';
+import { classifyNumber } from './utils/PatternEngine';
+
 // ── Home showcase: categories + patterns ─────────────────────────────────────
-function HomeShowcase({ allNumbers, isItemInCart, onToggleCart }) {
-  const getCat = (n) => String(n.number_category || n.category || '5');
-  const getPat = (n) => String(n.pattern_type || '');
+function HomeShowcase({ isItemInCart, onToggleCart, onSeeAll }) {
+  const { allNumbers, loading } = useFancyNumbers();
+  const [rowItems, setRowItems] = useState({});
+
+  useEffect(() => {
+    if (loading || !allNumbers.length) return;
+    
+    const newRowItems = { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [], 8: [] };
+    
+    allNumbers.forEach(n => {
+      const cat = String(n.number_category);
+      if (newRowItems[cat]) newRowItems[cat].push(n);
+      else newRowItems['6'].push(n);
+    });
+
+    setRowItems(newRowItems);
+  }, [allNumbers, loading]);
+
+  if (loading && !Object.keys(rowItems).length) return null;
+
+  if (loading) return null;
 
   return (
     <div>
-      {/* Section: By Category */}
-      <div style={sectionStyles.sectionTitle}>
-        <h2 style={sectionStyles.heading}>Browse by Category</h2>
-        <p style={sectionStyles.sub}>Premium numbers organized by rarity</p>
-      </div>
       {CATEGORIES.map(cat => {
-        const items = allNumbers.filter(n => getCat(n) === cat.id);
+        const items = rowItems[cat.id] || [];
+        if (items.length === 0) return null;
         return (
           <ScrollRow
             key={cat.id}
-            title={cat.label}
+            cat={cat}
             items={items}
-            accent={cat.accent}
             isItemInCart={isItemInCart}
             onToggleCart={onToggleCart}
-          />
-        );
-      })}
-
-      {/* Section: By Pattern */}
-      <div style={{ ...sectionStyles.sectionTitle, marginTop: '24px' }}>
-        <h2 style={sectionStyles.heading}>Browse by Pattern</h2>
-        <p style={sectionStyles.sub}>Discover unique number patterns</p>
-      </div>
-      {PATTERNS.map(pat => {
-        const items = allNumbers.filter(n => getPat(n) === pat.type);
-        return (
-          <ScrollRow
-            key={pat.type}
-            title={pat.label}
-            items={items}
-            accent={pat.accent}
-            isItemInCart={isItemInCart}
-            onToggleCart={onToggleCart}
+            onSeeAll={onSeeAll}
           />
         );
       })}
@@ -123,15 +149,39 @@ function HomeShowcase({ allNumbers, isItemInCart, onToggleCart }) {
 // ── Grid view (when filters are active) ──────────────────────────────────────
 function FilteredGrid({ numbers, isItemInCart, onToggleCart }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
-      {numbers.map(item => (
-        <NumberCard
-          key={item.number_id || item.id}
-          item={item}
-          inCart={isItemInCart(item.number_id || item.id)}
-          onToggleCart={onToggleCart}
-        />
-      ))}
+    <div className="cards-grid" style={{ marginTop: '20px' }}>
+      {numbers.map(item => {
+        if (item.is_bundle) {
+          if (item.bundle_type === 'couple') {
+            return (
+              <CoupleCard
+                key={`couple-${item.couple_id}`}
+                item={item}
+                isItemInCart={isItemInCart}
+                onToggleCart={onToggleCart}
+              />
+            );
+          }
+          if (item.bundle_type === 'group') {
+            return (
+              <GroupCard
+                key={`group-${item.group_id}`}
+                item={item}
+                isItemInCart={isItemInCart}
+                onToggleCart={onToggleCart}
+              />
+            );
+          }
+        }
+        return (
+          <NumberCard
+            key={item.number_id || item.id}
+            item={item}
+            inCart={isItemInCart(item.number_id || item.id)}
+            onToggleCart={onToggleCart}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -147,10 +197,10 @@ function App() {
   const [animDone, setAnimDone] = useState(false);
   const loaderTimerRef = useRef(null);
 
-  const hasActiveFilters = filters.query || filters.category || filters.pattern_type || filters.digitSum || filters.maxPrice < 500000;
+  const hasActiveFilters = filters.query || filters.category || filters.pattern_type || filters.digitSum || filters.maxPrice < 10000000;
 
   useEffect(() => {
-    loaderTimerRef.current = setTimeout(() => setAnimDone(true), 4200);
+    loaderTimerRef.current = setTimeout(() => setAnimDone(true), 3500);
     return () => clearTimeout(loaderTimerRef.current);
   }, []);
 
@@ -177,53 +227,58 @@ function App() {
   return (
     <>
       {showLoader && <Loader />}
-      <Navbar cartCount={cart.length} onCartClick={() => setIsCartOpen(true)} />
-      <Hero onSearch={(query) => updateFilter('query', query)} />
+      <Navbar 
+        cartCount={cart.length} 
+        onCartClick={() => setIsCartOpen(true)}
+        filters={filters}
+        onFilterChange={updateFilter}
+        allNumbers={allNumbers || numbers}
+      />
+      <Hero 
+        filters={filters}
+        onFilterChange={updateFilter}
+        onReset={resetFilters}
+        allNumbers={allNumbers || numbers}
+      />
 
       <main className="container" style={appStyles.mainLayout}>
-        <Sidebar
-          numbers={allNumbers || numbers}
-          filters={filters}
-          onFilterChange={updateFilter}
-          onReset={resetFilters}
-        />
-
         <section style={appStyles.resultsSection}>
-          {loading ? (
+          {loading && !showLoader ? (
             <div style={appStyles.centerState}>
-              <Loader2 className="spinner" size={48} style={{ color: 'var(--neon-green)', animation: 'spin 1s linear infinite', marginBottom: '20px' }} />
-              <p>Loading premium numbers...</p>
+              <Loader2 className="spinner" size={48} style={{ color: 'var(--primary)', animation: 'spin 1s linear infinite', marginBottom: '20px' }} />
+              <p>Fetching premium collection...</p>
             </div>
           ) : error ? (
             <div style={appStyles.centerState}>
-              <p style={{ color: '#ff4d4d' }}>{error}</p>
+              <p style={{ color: 'var(--danger)' }}>{error}</p>
             </div>
           ) : hasActiveFilters ? (
             <>
               <div style={appStyles.sectionHeader}>
-                <h2 style={{ margin: 0 }}>
-                  {filters.query ? 'Search Results' : 'Filtered Numbers'}
-                  <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 500, marginLeft: '12px' }}>
-                    ({numbers.length} found)
+                <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 600 }}>
+                  {filters.query ? `Results for "${filters.query}"` : 'Refined Selection'}
+                  <span style={{ fontSize: '12px', color: 'var(--muted)', fontWeight: 500, marginLeft: '12px' }}>
+                    ({numbers.length.toLocaleString()} found)
                   </span>
                 </h2>
-                <div>
+                <div style={{ display: 'flex', gap: '12px' }}>
                   <select
                     style={appStyles.sortSelect}
                     value={filters.sortOrder}
                     onChange={(e) => updateFilter('sortOrder', e.target.value)}
                   >
-                    <option value="default">Sort By</option>
+                    <option value="default">Default Sort</option>
                     <option value="price_asc">Price: Low to High</option>
                     <option value="price_desc">Price: High to Low</option>
                   </select>
                 </div>
               </div>
+              
               {numbers.length === 0 ? (
                 <div style={appStyles.centerState}>
-                  <Ghost size={48} style={{ color: 'var(--text-muted)', marginBottom: '16px' }} />
-                  <h3 style={{ marginBottom: '8px', fontSize: '1.2rem' }}>No numbers found</h3>
-                  <p style={{ color: 'var(--text-muted)' }}>Try a different search or filter.</p>
+                  <Ghost size={48} style={{ color: 'var(--muted)', marginBottom: '16px' }} />
+                  <h3 style={{ marginBottom: '8px', fontSize: '1.2rem' }}>No matches found</h3>
+                  <p style={{ color: 'var(--muted)', fontSize: '14px' }}>Try adjusting your filters or search query.</p>
                 </div>
               ) : (
                 <FilteredGrid numbers={numbers} isItemInCart={isItemInCart} onToggleCart={toggleCartItem} />
@@ -231,9 +286,12 @@ function App() {
             </>
           ) : (
             <HomeShowcase
-              allNumbers={allNumbers || numbers}
               isItemInCart={isItemInCart}
               onToggleCart={toggleCartItem}
+              onSeeAll={(catId) => {
+                updateFilter('category', catId);
+                window.scrollTo({ top: 500, behavior: 'smooth' });
+              }}
             />
           )}
         </section>
@@ -246,20 +304,37 @@ function App() {
         onToggleCart={toggleCartItem}
       />
 
+      <AdPopup />
+
       <footer style={appStyles.footer}>
         <div className="container" style={appStyles.footerContent}>
           <div>
-            <h2>As<span className="text-neon">FancyNumber</span></h2>
-            <p style={{ color: 'var(--text-muted)', marginTop: '10px' }}>Your premium destination for VIP mobile numbers.</p>
+            <h2 style={{ fontFamily: "var(--font-display)", fontSize: '20px', fontWeight: 700, color: '#fff', letterSpacing: '0.10em', textTransform: 'uppercase' }}>
+              As<span style={{ color: 'var(--primary)' }}>FancyNumber</span>
+            </h2>
+            <p style={{ fontFamily: "var(--font-body)", color: 'var(--muted)', marginTop: '12px', fontSize: '13px', fontWeight: 300, maxWidth: '300px', lineHeight: 1.7 }}>
+              India's premier marketplace for high-value VIP mobile numbers. Elevating digital identities since 2026.
+            </p>
           </div>
           <div style={appStyles.footerLinks}>
-            <a href="#">Terms & Conditions</a>
-            <a href="#">Privacy Policy</a>
-            <a href="#">Contact Support</a>
+            <div style={footerGroupStyles}>
+              <h4 style={footerTitleStyles}>Navigation</h4>
+              <a href="#" style={{ fontFamily: "var(--font-ui)", fontSize: '13px', color: 'var(--muted)', textDecoration: 'none' }}>VIP Collection</a>
+              <a href="#" style={{ fontFamily: "var(--font-ui)", fontSize: '13px', color: 'var(--muted)', textDecoration: 'none' }}>Flash Offers</a>
+              <a href="#" style={{ fontFamily: "var(--font-ui)", fontSize: '13px', color: 'var(--muted)', textDecoration: 'none' }}>Special Pairs</a>
+            </div>
+            <div style={footerGroupStyles}>
+              <h4 style={footerTitleStyles}>Support</h4>
+              <a href="#" style={{ fontFamily: "var(--font-ui)", fontSize: '13px', color: 'var(--muted)', textDecoration: 'none' }}>Contact Support</a>
+              <a href="#" style={{ fontFamily: "var(--font-ui)", fontSize: '13px', color: 'var(--muted)', textDecoration: 'none' }}>How it Works</a>
+              <a href="#" style={{ fontFamily: "var(--font-ui)", fontSize: '13px', color: 'var(--muted)', textDecoration: 'none' }}>Terms of Service</a>
+            </div>
           </div>
         </div>
-        <div style={appStyles.footerBottom}>
-          <p>&copy; 2026 AsFancyNumber. All rights reserved.</p>
+        <div className="container">
+          <div style={appStyles.footerBottom}>
+            <p>&copy; 2026 AsFancyNumber Premium. Handcrafted for Distinction.</p>
+          </div>
         </div>
       </footer>
     </>
@@ -268,150 +343,78 @@ function App() {
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
-const rowStyles = {
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '14px',
-  },
-  accent: {
-    width: '4px',
-    height: '22px',
-    borderRadius: '2px',
-    display: 'inline-block',
-  },
-  title: {
-    margin: 0,
-    fontSize: '1.1rem',
-    fontWeight: 800,
-    color: 'var(--text-main)',
-  },
-  count: {
-    fontSize: '0.75rem',
-    color: 'var(--text-muted)',
-    fontWeight: 700,
-    background: '#f1f5f9',
-    padding: '2px 8px',
-    borderRadius: '10px',
-  },
-  arrowBtn: {
-    width: '32px',
-    height: '32px',
-    borderRadius: '50%',
-    border: '1px solid var(--border-color)',
-    background: 'var(--bg-card)',
-    color: 'var(--text-main)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-    transition: 'all 0.2s',
-  },
-  scrollContainer: {
-    display: 'flex',
-    gap: '16px',
-    overflowX: 'auto',
-    paddingBottom: '8px',
-    scrollbarWidth: 'thin',
-    scrollSnapType: 'x mandatory',
-  },
-  moreBadge: {
-    minWidth: '120px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: '#f8fafc',
-    border: '2px dashed var(--border-color)',
-    borderRadius: '14px',
-    color: 'var(--text-muted)',
-    fontSize: '0.85rem',
-    fontWeight: 700,
-    flexShrink: 0,
-  },
+const footerGroupStyles = {
+  display: 'flex', flexDirection: 'column', gap: '12px'
+};
+const footerTitleStyles = {
+  fontFamily: "var(--font-ui)", fontSize: '12px', fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px'
 };
 
-const sectionStyles = {
-  sectionTitle: {
-    marginBottom: '28px',
+const rowStyles = {
+  scrollWrapper: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    margin: '0 -20px',
+    padding: '0 20px',
   },
-  heading: {
-    fontSize: '1.5rem',
-    fontWeight: 800,
-    color: 'var(--text-main)',
-    margin: '0 0 4px 0',
+  arrowBtnLeft: {
+    position: 'absolute', left: '-20px', zIndex: 10,
+    background: 'rgba(13,13,18,0.8)', border: '1px solid var(--border)',
+    borderRadius: '50%', width: '40px', height: '40px',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    color: '#fff', cursor: 'pointer', backdropFilter: 'blur(10px)',
   },
-  sub: {
-    fontSize: '0.9rem',
-    color: 'var(--text-muted)',
-    fontWeight: 500,
-    margin: 0,
+  arrowBtnRight: {
+    position: 'absolute', right: '-20px', zIndex: 10,
+    background: 'rgba(13,13,18,0.8)', border: '1px solid var(--border)',
+    borderRadius: '50%', width: '40px', height: '40px',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    color: '#fff', cursor: 'pointer', backdropFilter: 'blur(10px)',
+  },
+  scrollContainer: {
+    display: 'flex', gap: '16px', overflowX: 'auto', padding: '10px 0 20px',
+    scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch', flex: 1,
+  },
+  moreBadge: {
+    minWidth: '220px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+    color: 'var(--muted)', fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+    transition: 'all 0.2s', flexShrink: 0, textAlign: 'center', lineHeight: 1.5
   },
 };
 
 const appStyles = {
   mainLayout: {
-    display: 'grid',
-    gridTemplateColumns: '280px 1fr',
-    gap: '40px',
-    paddingBottom: '80px',
-    marginTop: '40px',
+    paddingBottom: '80px', position: 'relative',
+    display: 'flex', flexDirection: 'column', gap: '32px'
   },
-  resultsSection: {
-    width: '100%',
-    minWidth: 0,
-  },
+  resultsSection: { width: '100%', minWidth: 0 },
   sectionHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '30px',
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    marginBottom: '32px', padding: '16px 0', borderBottom: '1px solid var(--border)',
   },
   sortSelect: {
-    background: '#ffffff',
-    color: 'var(--text-main)',
-    border: '1px solid var(--border-color)',
-    padding: '10px 16px',
-    borderRadius: 'var(--radius-md)',
-    outline: 'none',
-    boxShadow: 'var(--shadow-sm)',
-    fontWeight: 600,
-    cursor: 'pointer',
+    background: 'var(--bg2)', color: 'var(--text)', border: '1px solid var(--border)',
+    padding: '10px 16px', borderRadius: '10px', outline: 'none',
+    fontWeight: 600, cursor: 'pointer', fontSize: '13px'
   },
   centerState: {
-    textAlign: 'center',
-    padding: '60px 0',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    background: '#ffffff',
-    borderRadius: 'var(--radius-lg)',
-    border: '1px dashed var(--border-color)',
+    textAlign: 'center', padding: '100px 0', display: 'flex', flexDirection: 'column',
+    alignItems: 'center', background: 'var(--bg2)', borderRadius: 'var(--radius)',
+    border: '1px solid var(--border)', color: 'var(--muted)'
   },
   footer: {
-    background: '#ffffff',
-    borderTop: '1px solid var(--border-color)',
-    padding: '60px 0 20px',
-    marginTop: '40px',
+    background: 'var(--bg)', borderTop: '1px solid var(--border)',
+    padding: '100px 0 40px', marginTop: '80px',
   },
   footerContent: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    marginBottom: '40px',
-    flexWrap: 'wrap',
-    gap: '40px',
+    display: 'flex', justifyContent: 'space-between', marginBottom: '80px', flexWrap: 'wrap', gap: '60px',
   },
-  footerLinks: {
-    display: 'flex',
-    gap: '24px',
-  },
+  footerLinks: { display: 'flex', gap: '80px', flexWrap: 'wrap' },
   footerBottom: {
-    textAlign: 'center',
-    paddingTop: '20px',
-    borderTop: '1px solid var(--border-color)',
-    color: 'var(--text-muted)',
-    fontSize: '0.9rem',
-    fontWeight: 500,
+    textAlign: 'center', paddingTop: '40px', borderTop: '1px solid var(--border)',
+    color: 'var(--muted)', fontSize: '12px', fontWeight: 400, fontFamily: "var(--font-ui)"
   },
 };
 

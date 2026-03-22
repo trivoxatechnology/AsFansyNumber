@@ -1,310 +1,180 @@
-import { Check, Plus } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ShoppingCart, Zap, Clock, Star } from 'lucide-react';
 
 const formatPrice = (price) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(price);
 
 const CATEGORY_META = {
-  1: { label: 'Diamond',  color: '#0ea5e9', bg: '#e0f2fe', border: '#7dd3fc' },
-  2: { label: 'Platinum', color: '#8b5cf6', bg: '#ede9fe', border: '#c4b5fd' },
-  3: { label: 'Gold',     color: '#d97706', bg: '#fef3c7', border: '#fcd34d' },
-  4: { label: 'Silver',   color: '#64748b', bg: '#f1f5f9', border: '#cbd5e1' },
-  5: { label: 'Normal',   color: '#6b7280', bg: '#f9fafb', border: '#e5e7eb' },
+  1: { label: 'Diamond',  emoji: '💎', cls: 'diamond', color: 'var(--primary)' },
+  2: { label: 'Platinum', emoji: '💍', cls: 'platinum', color: 'var(--platinum)' },
+  3: { label: 'Gold',     emoji: '⭐', cls: 'gold', color: 'var(--gold)' },
+  4: { label: 'Silver',   emoji: '🥈', cls: 'silver', color: 'var(--silver)' },
+  5: { label: 'Bronze',   emoji: '🥉', cls: 'bronze', color: 'var(--bronze)' },
+  7: { label: 'Couple',   emoji: '👫', cls: 'couple', color: 'var(--couple)' },
+  8: { label: 'Business', emoji: '💼', cls: 'business', color: 'var(--business)' },
+  6: { label: 'Normal',   emoji: '📱', cls: 'normal', color: 'var(--normal)' },
 };
 
-const getCategoryMeta = (item) => {
-  const cat = String(item.number_category || item.category || '5');
-  return CATEGORY_META[cat] || CATEGORY_META[5];
-};
-
-const formatMobileNumber = (num) => {
-  if (!num) return 'N/A';
-  const str = num.toString();
-  if (str.length === 10) {
-    return (
-      <>
-        {str.slice(0, 5)} <span className="text-neon">{str.slice(5)}</span>
-      </>
-    );
-  }
-  return str;
-};
+function timeLeft(endDateStr) {
+  if (!endDateStr) return null;
+  const end = new Date(endDateStr);
+  const now = new Date();
+  const diff = end - now;
+  if (diff <= 0) return 'Expired';
+  const d = Math.floor(diff / 86400000);
+  const h = Math.floor((diff % 86400000) / 3600000);
+  const m = Math.floor((diff % 3600000) / 60000);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
 
 export default function NumberCard({ item, onToggleCart, inCart, compact = false }) {
+  const [timeRemaining, setTimeRemaining] = useState(() => timeLeft(item.offer_end_date));
+
+  useEffect(() => {
+    if (!item.offer_end_date) return;
+    const timer = setInterval(() => {
+      setTimeRemaining(timeLeft(item.offer_end_date));
+    }, 60000);
+    return () => clearInterval(timer);
+  }, [item.offer_end_date]);
+
   const basePrice = parseFloat(item.base_price) || 0;
   const offerPrice = parseFloat(item.offer_price) || 0;
   const hasOffer = offerPrice > 0 && offerPrice < basePrice;
   const activePrice = hasOffer ? offerPrice : basePrice;
-  const catMeta = getCategoryMeta(item);
-  const pattern = item.pattern_name || item.pattern_type || '-';
+  const cat = String(item.number_category || item.category || '6');
+  const meta = CATEGORY_META[cat] || CATEGORY_META[6];
+  
+  const score = parseInt(item.vip_score) || 0;
+  const stars = Math.round((score / 100) * 5);
 
-  if (compact) {
-    // Compact card for horizontal scroll rows
-    return (
-      <div style={compactStyles.card}>
-        <div style={{ ...compactStyles.catBadge, background: catMeta.bg, color: catMeta.color, borderColor: catMeta.border }}>
-          {catMeta.label}
-        </div>
-        <div style={compactStyles.number}>
-          {formatMobileNumber(item.mobile_number)}
-        </div>
-        <div style={compactStyles.patternLabel}>{pattern}</div>
-        <div style={compactStyles.footer}>
-          <div>
-            {hasOffer && <span style={compactStyles.oldPrice}>{formatPrice(basePrice)}</span>}
-            <div style={compactStyles.price}>{formatPrice(activePrice)}</div>
-          </div>
-          <button
-            style={{ ...compactStyles.cartBtn, ...(inCart ? compactStyles.cartBtnActive : {}) }}
-            onClick={() => onToggleCart(item)}
-            title={inCart ? 'Remove from Cart' : 'Add to Cart'}
-          >
-            {inCart ? <Check size={16} /> : <Plus size={16} />}
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const fmtMobile = (num) => {
+    const s = String(num);
+    return s.length === 10 ? (
+      <span style={{ fontFamily: "var(--font-number)", letterSpacing: '0.10em' }}>
+        <span style={{ opacity: 0.5 }}>{s.slice(0, 5)}</span>{s.slice(5)}
+      </span>
+    ) : <span style={{ fontFamily: "var(--font-number)", letterSpacing: '0.10em' }}>{s}</span>;
+  };
 
-  // Full card (grid view)
+  const disc = hasOffer ? Math.round((1 - offerPrice / basePrice) * 100) : 0;
+
   return (
-    <div className="number-card" style={styles.card}>
-      <div style={styles.cardGlow} />
+    <div 
+      className={`num-card cat-${meta.cls}`}
+      style={{
+        background: 'var(--bg2)',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius)',
+        borderTop: `2px solid ${meta.color}`,
+        position: 'relative',
+        transition: 'all 0.3s cubic-bezier(0.2, 0, 0, 1)',
+        padding: '16px',
+        display: 'flex',
+        flexDirection: 'column',
+        minWidth: compact ? '220px' : 'auto',
+        flexShrink: compact ? 0 : 1
+      }}
+    >
       {hasOffer && (
-        <div style={styles.discountBadge}>
-          {Math.round(((basePrice - offerPrice) / basePrice) * 100)}% OFF
+        <div style={{
+          position: 'absolute', top: '12px', right: '12px',
+          background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)',
+          borderRadius: '8px', padding: '4px 10px', fontSize: '11px', 
+          fontFamily: "var(--font-body)", fontWeight: 700, letterSpacing: '0.03em',
+          color: meta.color
+        }}>
+          ★ {disc}% OFF
         </div>
       )}
-      <div style={styles.header}>
-        <span style={{ ...styles.category, background: catMeta.bg, color: catMeta.color, border: `1px solid ${catMeta.border}` }}>
-          {catMeta.label}
-        </span>
+
+      <div style={{ 
+        display: 'inline-flex', alignItems: 'center', gap: '5px',
+        fontSize: '9px', fontFamily: "var(--font-display)", fontWeight: 700, 
+        letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: '10px', 
+        color: meta.color
+      }}>
+        {meta.emoji} {meta.label} · {item.category_type || item.pattern_type || ''}
       </div>
-      <div style={styles.number}>
-        {formatMobileNumber(item.mobile_number)}
+
+      <div style={{ 
+        fontSize: compact ? '18px' : '22px', fontWeight: 500, letterSpacing: '0.08em', 
+        fontFamily: "var(--font-number)", marginBottom: '4px', color: '#fff' 
+      }}>
+        {fmtMobile(item.mobile_number)}
       </div>
-      <div style={styles.details}>
-        <div style={styles.stat}>
-          <div style={styles.statLabel}>Total</div>
-          <div style={styles.statValue}>{item.digit_sum || '-'}</div>
-        </div>
-        <div style={styles.stat}>
-          <div style={styles.statLabel}>Pattern</div>
-          <div style={{ ...styles.statValue, color: 'var(--text-main)', opacity: 0.8, fontSize: '0.85rem' }}>{pattern}</div>
-        </div>
-        <div style={styles.stat}>
-          <div style={styles.statLabel}>Score</div>
-          <div style={styles.statValue}>{item.vip_score || '-'}</div>
-        </div>
+
+      <div style={{ 
+        fontSize: '11px', fontFamily: "var(--font-number)", fontWeight: 300,
+        letterSpacing: '0.04em', color: 'var(--muted)', marginBottom: '12px' 
+      }}>
+        {item.sub_category || item.pattern_name || ''}
       </div>
-      <div style={styles.footer}>
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-          {hasOffer && <span style={styles.originalPrice}>{formatPrice(basePrice)}</span>}
-          <div style={styles.price}>{formatPrice(activePrice)}</div>
+
+      <div style={{ display: 'flex', gap: '2px', marginBottom: '10px' }}>
+        {[1, 2, 3, 4, 5].map(i => (
+          <Star 
+            key={i} size={11} 
+            fill={i <= stars ? meta.color : 'none'} 
+            stroke={meta.color} 
+            style={{ opacity: i <= stars ? 0.9 : 0.2 }} 
+          />
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', marginBottom: '14px', flexWrap: 'wrap' }}>
+        <div style={{ 
+          fontFamily: "var(--font-heading)", fontSize: '22px', 
+          fontWeight: 700, color: meta.color, letterSpacing: '-0.01em' 
+        }}>
+          {formatPrice(activePrice)}
         </div>
-        <button
-          style={{ ...styles.addBtn, ...(inCart ? styles.addBtnActive : {}) }}
+        {hasOffer && (
+          <>
+            <div style={{ fontSize: '12px', color: 'var(--muted)', textDecoration: 'line-through', fontFamily: "var(--font-number)", fontWeight: 300 }}>
+              {formatPrice(basePrice)}
+            </div>
+            <div style={{ fontSize: '10px', fontFamily: "var(--font-body)", fontWeight: 600, color: 'var(--success)', background: 'rgba(0,230,118,0.08)', borderRadius: '6px', padding: '2px 7px' }}>
+              Save {formatPrice(basePrice - offerPrice)}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', gap: '8px', marginTop: 'auto' }}>
+        <button 
           onClick={() => onToggleCart(item)}
-          title={inCart ? 'Remove from Cart' : 'Add to Cart'}
+          style={{
+            flex: 1, background: inCart ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.06)',
+            border: '1px solid var(--border)', borderRadius: '9px', padding: '9px 0',
+            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+            fontFamily: "var(--font-body)", fontWeight: 600,
+            color: inCart ? 'var(--success)' : 'var(--text)'
+          }}
         >
-          {inCart ? <Check size={20} /> : <Plus size={20} />}
+          <ShoppingCart size={13} />
+        </button>
+        <button 
+          onClick={(e) => { e.stopPropagation(); onToggleCart(item); }}
+          style={{
+            flex: 3, border: 'none', borderRadius: '9px', padding: '9px 0',
+            fontFamily: "var(--font-body)", fontWeight: 700, cursor: 'pointer', 
+            background: `linear-gradient(135deg, ${meta.color}, #fff)`,
+            color: '#000', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.02em'
+          }}
+        >
+          Buy Now
         </button>
       </div>
+
+      {hasOffer && item.offer_end_date && timeRemaining !== 'Expired' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '10px', color: 'var(--danger)', marginTop: '8px', fontFamily: "var(--font-body)", fontWeight: 500 }}>
+          <Clock size={11} />
+          Offer ends: <span style={{ fontFamily: "var(--font-number)", fontWeight: 500 }}>{timeRemaining}</span>
+        </div>
+      )}
     </div>
   );
 }
-
-// Compact card styles — for horizontal scroll rows
-const compactStyles = {
-  card: {
-    minWidth: '220px',
-    maxWidth: '220px',
-    background: 'var(--bg-card)',
-    border: '1px solid var(--border-color)',
-    borderRadius: '14px',
-    padding: '16px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-    flexShrink: 0,
-    boxShadow: 'var(--shadow-sm)',
-    transition: 'transform 0.2s, box-shadow 0.2s',
-    cursor: 'default',
-  },
-  catBadge: {
-    fontSize: '0.65rem',
-    fontWeight: 700,
-    padding: '2px 8px',
-    borderRadius: '12px',
-    border: '1px solid',
-    alignSelf: 'flex-start',
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px',
-  },
-  number: {
-    fontSize: '1.4rem',
-    fontWeight: 800,
-    letterSpacing: '1.5px',
-    textAlign: 'center',
-    color: 'var(--text-main)',
-    padding: '4px 0',
-  },
-  patternLabel: {
-    fontSize: '0.7rem',
-    color: 'var(--text-muted)',
-    fontWeight: 600,
-    textAlign: 'center',
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px',
-  },
-  footer: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderTop: '1px solid var(--border-color)',
-    paddingTop: '8px',
-    marginTop: '4px',
-  },
-  oldPrice: {
-    fontSize: '0.72rem',
-    color: 'var(--text-muted)',
-    textDecoration: 'line-through',
-  },
-  price: {
-    fontSize: '1.1rem',
-    fontWeight: 800,
-    color: 'var(--text-main)',
-  },
-  cartBtn: {
-    width: '32px',
-    height: '32px',
-    borderRadius: '50%',
-    border: '2px solid var(--neon-green)',
-    background: 'transparent',
-    color: 'var(--neon-green-dark)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-    transition: 'all 0.2s',
-    flexShrink: 0,
-  },
-  cartBtnActive: {
-    background: 'var(--neon-green)',
-    color: '#fff',
-    border: 'none',
-  },
-};
-
-// Full card styles
-const styles = {
-  card: {
-    background: 'var(--bg-card)',
-    border: '1px solid var(--border-color)',
-    borderRadius: 'var(--radius-lg)',
-    padding: '24px',
-    transition: 'var(--transition)',
-    position: 'relative',
-    overflow: 'hidden',
-    display: 'flex',
-    flexDirection: 'column',
-    justifyContent: 'space-between',
-    boxShadow: 'var(--shadow-sm)',
-  },
-  cardGlow: {
-    position: 'absolute',
-    top: 0, left: 0, width: '100%', height: '3px',
-    background: 'linear-gradient(90deg, transparent, var(--neon-green), transparent)',
-    opacity: 0,
-    transition: 'var(--transition)',
-  },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: '16px',
-  },
-  category: {
-    fontSize: '0.75rem',
-    padding: '4px 12px',
-    borderRadius: '20px',
-    fontWeight: 700,
-  },
-  number: {
-    fontSize: '2.2rem',
-    fontWeight: 800,
-    letterSpacing: '2px',
-    marginBottom: '12px',
-    textAlign: 'center',
-    color: 'var(--text-main)',
-  },
-  details: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    marginBottom: '20px',
-    borderTop: '1px solid var(--border-color)',
-    paddingTop: '16px',
-  },
-  stat: { textAlign: 'center' },
-  statLabel: {
-    fontSize: '0.7rem',
-    color: 'var(--text-muted)',
-    textTransform: 'uppercase',
-    letterSpacing: '1px',
-    fontWeight: 700,
-  },
-  statValue: {
-    fontSize: '1.15rem',
-    fontWeight: 700,
-    color: 'var(--neon-green-dark)',
-  },
-  footer: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  price: {
-    fontSize: '1.5rem',
-    fontWeight: 800,
-    color: 'var(--text-main)',
-  },
-  addBtn: {
-    background: 'transparent',
-    border: '2px solid var(--neon-green)',
-    color: 'var(--neon-green-dark)',
-    width: '40px',
-    height: '40px',
-    borderRadius: '50%',
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    cursor: 'pointer',
-    transition: 'var(--transition)',
-    fontWeight: 800,
-  },
-  addBtnActive: {
-    background: 'var(--neon-green)',
-    color: '#fff',
-    border: 'none',
-  },
-  discountBadge: {
-    position: 'absolute',
-    top: '16px',
-    right: '-30px',
-    background: '#ef4444',
-    color: '#fff',
-    padding: '4px 30px',
-    transform: 'rotate(45deg)',
-    fontSize: '0.75rem',
-    fontWeight: 800,
-    boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-    zIndex: 2,
-    letterSpacing: '1px',
-  },
-  originalPrice: {
-    fontSize: '0.85rem',
-    color: 'var(--text-muted)',
-    textDecoration: 'line-through',
-    marginBottom: '-4px',
-    fontWeight: 600,
-  },
-};

@@ -1,8 +1,11 @@
 /**
  * Shared API configuration for admin app.
- * Centralizes base URL for easy environment switching.
+ * Uses VITE_API_URL env variable for dev/production switching.
+ *
+ * Dev:  Vite proxy at /fancy_number/api.php → Hostinger
+ * Prod: Direct URL to https://asfancynumber.com/admin/api.php
  */
-export const API_BASE = '/fancy_number/api.php';
+export const API_BASE = import.meta.env.VITE_API_URL || '/fancy_number/api.php';
 
 export function apiUrl(path) {
   const normalized = path.startsWith('/') ? path.slice(1) : path;
@@ -10,8 +13,6 @@ export function apiUrl(path) {
 }
 
 export function getTemplateUrl(format = 'xlsx') {
-  // Extract the base directory from API_BASE and point to ajax folder
-  // If API_BASE is .../fancy_number/api.php, we want .../fancy_number/ajax/...
   const base = API_BASE.substring(0, API_BASE.lastIndexOf('/'));
   return `${base}/ajax/download-template.php?format=${format}`;
 }

@@ -26,11 +26,6 @@ const Dealers = () => <div className="card"><h2>Dealers</h2><p>Coming soon...</p
 const WhatsAppConfig = () => <div className="card"><h2>WhatsApp Config</h2><p>Coming soon...</p></div>;
 const ActivityLog = () => <div className="card"><h2>Activity Log</h2><p>Coming soon...</p></div>;
 
-// Legacy components to be removed once rebuild is complete
-import OfferUpload from './pages/OfferUpload';
-import ImportWorkspace from './pages/ImportWorkspace';
-import DeleteExcel from './pages/DeleteExcel';
-
 // Protected Route Wrapper
 const ProtectedRoute = ({ children }) => {
   if (!validateSession()) return <Navigate to="/login" replace />;
@@ -60,7 +55,7 @@ export default function App() {
       <ToastProvider>
         <ConfirmProvider>
           <style>{toastCSS}</style>
-          <BrowserRouter basename="/admin">
+          <BrowserRouter basename={import.meta.env.DEV ? "/" : "/admin"}>
             <Routes>
               <Route path="/login" element={<Login />} />
               
@@ -82,8 +77,6 @@ export default function App() {
 
                 {/* Legacy fallback / migration paths */}
                 <Route path="import-workspace" element={<Navigate to="/upload" replace />} />
-                <Route path="offer-upload" element={<OfferUpload />} />
-                <Route path="delete-excel" element={<DeleteExcel />} />
                 <Route path="draft-management" element={<Navigate to="/drafts" replace />} />
               </Route>
               

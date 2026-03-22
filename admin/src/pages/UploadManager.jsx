@@ -26,10 +26,8 @@ function validateRow(row, idx, existingSet) {
   
   if (!mobile) {
     errors.push({ field: 'mobile_number', msg: 'Mobile number is required' });
-  } else if (mobile.length !== 10) {
-    errors.push({ field: 'mobile_number', msg: 'Must be exactly 10 digits' });
-  } else if (!/^[6-9]/.test(mobile)) {
-    errors.push({ field: 'mobile_number', msg: 'Must start with 6, 7, 8, or 9' });
+  } else if (mobile.length < 9) {
+    errors.push({ field: 'mobile_number', msg: 'Must be at least 9 digits' });
   }
 
   const bp = parseFloat(row.base_price || 0);
@@ -56,6 +54,17 @@ function validateRow(row, idx, existingSet) {
   // Helper: use row value if present (including 0), else use fallback
   const v = (val, fb) => (val !== undefined && val !== null && val !== '') ? val : fb;
 
+  // Auto-inject bundle_type for Couple (7) and Business (8) categories
+  // IMPORTANT: ALIAS_MAP maps CSV's 'number_category' to 'category', so check both
+  const userCat = row.number_category || row.category;
+  const finalCat = v(userCat, pattern.number_category);
+  const nc = String(finalCat);
+  let bundle_type = v(row.bundle_type, '');
+  if (!bundle_type) {
+    if (nc === '7') bundle_type = 'couple';
+    else if (nc === '8') bundle_type = 'group';
+  }
+
   return {
     _rowId: idx + 2,
     _status,
@@ -67,7 +76,7 @@ function validateRow(row, idx, existingSet) {
     mobile_number: mobile || '',
     number_type: v(row.number_type, ''),
     category: v(row.category, ''),
-    number_category: v(row.number_category, pattern.number_category),
+    number_category: finalCat,
     base_price: v(row.base_price, ''),
     offer_price: v(row.offer_price, ''),
     offer_start_date: v(row.offer_start_date, ''),
@@ -76,11 +85,12 @@ function validateRow(row, idx, existingSet) {
     number_status: v(row.number_status, 'available'),
     visibility_status: row.visibility_status !== undefined ? row.visibility_status : '1',
     inventory_source: v(row.inventory_source, ''),
-    dealer_id: v(row.dealer_id, ''),
-    couple_number_id: v(row.couple_number_id, ''),
-    group_number_id: v(row.group_number_id, ''),
+    dealer_id: row.dealer_id || null,
+    couple_id: row.couple_number_id || row.couple_id || null,
+    group_id: row.group_number_id || row.group_id || null,
     remarks: v(row.remarks, ''),
     draft_reason: v(row.draft_reason, ''),
+    bundle_type,
 
     // Type C (Auto-Generated) — explicit checks so 0 values are preserved
     pattern_name: v(row.pattern_name, pattern.pattern_name),
@@ -154,7 +164,7 @@ const STATUS_STYLES = {
 
 export default function ImportWorkspace() {
   const toast = useToast();
-  const { runBulkImport, parseSession, updateParseSession, clearParseSession } = useImport();
+  const { runBulkImport, runServerUpload, parseSession, updateParseSession, clearParseSession } = useImport();
   const { rows, step, fileName, isParsing, parseProgress, operatorName } = parseSession;
 
   const setRows = (val) => updateParseSession({ rows: typeof val === 'function' ? val(parseSession.rows) : val });
@@ -183,8 +193,23 @@ export default function ImportWorkspace() {
     'offer_start_date', 'offer_end_date', 'platform_commission', 'number_status',
     'visibility_status', 'inventory_source', 'dealer_id', 'remarks', 'draft_reason',
     'pattern_name', 'pattern_type', 'prefix', 'suffix', 'digit_sum', 'repeat_count',
-    'vip_score', 'auto_detected', 'couple_number_id', 'group_number_id'
+    'vip_score', 'auto_detected', 'couple_id', 'group_id', 'bundle_type'
   ]);
+
+  // Server-side upload handler — sends file directly to PHP
+  const handleServerUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!['csv', 'xlsx'].includes(ext)) {
+      toast.error('Only .csv and .xlsx files are accepted');
+      return;
+    }
+    toast.info(`Uploading ${file.name} to server...`);
+    await runServerUpload({ file, operatorName: operatorName || 'Admin' });
+    toast.success('Upload job started! Check progress in the import tracker.');
+    if (e.target) e.target.value = '';
+  };
 
   const onDrop = useCallback(async (files) => {
     const file = files[0]; if (!file) return;
@@ -211,8 +236,8 @@ export default function ImportWorkspace() {
         'offer': 'offer_price', 'discount_price': 'offer_price', 'sale_price': 'offer_price',
         'number_category': 'category', 'cat': 'category',
         'inventory': 'inventory_source', 'source': 'inventory_source', 'file': 'inventory_source',
-        'couple_id': 'couple_number_id', 'couple_no': 'couple_number_id', 'couple': 'couple_number_id',
-        'group_id': 'group_number_id', 'group_no': 'group_number_id', 'group': 'group_number_id',
+        'couple_number_id': 'couple_id', 'couple_no': 'couple_id', 'couple': 'couple_id',
+        'group_number_id': 'group_id', 'group_no': 'group_id', 'group': 'group_id',
         'dealer': 'dealer_id', 'status': 'number_status', 'type': 'number_type',
         'remark': 'remarks', 'note': 'remarks', 'notes': 'remarks',
         'commission': 'platform_commission', 'visibility': 'visibility_status',
@@ -407,8 +432,8 @@ export default function ImportWorkspace() {
   const COLS_STEP1 = [
     'mobile_number', 'number_type', 'category', 'base_price', 'offer_price',
     'offer_start_date', 'offer_end_date', 'platform_commission', 'number_status',
-    'visibility_status', 'inventory_source', 'dealer_id', 'couple_number_id',
-    'group_number_id', 'remarks', 'draft_reason'
+    'visibility_status', 'inventory_source', 'dealer_id', 'couple_id',
+    'group_id', 'remarks', 'draft_reason'
   ];
 
   const COLS_STEP2 = [
@@ -453,6 +478,17 @@ export default function ImportWorkspace() {
               <p>{parseProgress}</p>
             </div>
           )}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', marginTop: '18px' }}>
+            <span style={{ color: '#94a3b8', fontSize: '0.85rem' }}>— or —</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: '12px' }}>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '10px 24px', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', color: '#fff', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '0.9rem', border: 'none', transition: 'opacity 0.2s' }}>
+              <Archive size={18} />
+              Quick Server Upload (skip preview)
+              <input type="file" accept=".csv,.xlsx" style={{ display: 'none' }} onChange={handleServerUpload} />
+            </label>
+          </div>
+          <p style={{ textAlign: 'center', color: '#94a3b8', fontSize: '0.75rem', marginTop: '8px' }}>Server processes the file directly — validates, deduplicates, and inserts in one step</p>
         </div>
       )}
 
@@ -505,11 +541,13 @@ export default function ImportWorkspace() {
                 <tr>
                   <th style={s.th}>Row</th>
                   <th style={s.th}>Status</th>
+                  <th style={{ ...s.th, minWidth: '150px' }}>Error Details</th>
                   {COLS_STEP1.map(c => <th key={c} style={s.th}>{c.replace(/_/g, ' ')}</th>)}
                 </tr>
               </thead>
               <tbody>{display.slice(0, displayLimit).map((row, vi) => {
                 const ri = rows.indexOf(row);
+                const errorStr = (row._errors || []).map(e => e.msg).join('; ');
                 return (
                   <tr key={vi}>
                     <td style={s.td}><small>{row._rowId}</small></td>
@@ -521,6 +559,9 @@ export default function ImportWorkspace() {
                       }}>
                         {row._status.toUpperCase()}
                       </span>
+                    </td>
+                    <td style={{ ...s.td, color: '#dc2626', fontSize: '0.8rem', fontWeight: 500 }}>
+                      {errorStr}
                     </td>
                     {COLS_STEP1.map(c => (
                       <td key={c} style={{ ...s.td, padding: 0, minWidth: '140px' }}>
@@ -621,18 +662,32 @@ export default function ImportWorkspace() {
         </div>
       )}
 
-      {step === 4 && (
+      {step === 4 && (() => {
+        const importable = rows.filter(r => r._status === 'valid' || r._status === 'conflict');
+        const cpls = importable.filter(r => r.couple_id || String(r.number_category) === '7');
+        const grps = importable.filter(r => r.group_id || String(r.number_category) === '8');
+        const cCount = cpls.length;
+        const gCount = grps.length;
+        
+        // Count unique explicit IDs, or fallback to math approximation if categories were forced manually
+        const cUnique = new Set(cpls.map(r => r.couple_id).filter(Boolean)).size || (cCount > 0 ? Math.ceil(cCount/2) : 0);
+        const gUnique = new Set(grps.map(r => r.group_id).filter(Boolean)).size || (gCount > 0 ? Math.ceil(gCount/5) : 0);
+
+        return (
         <div style={s.card}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
             <h2>Confirm Import</h2>
             <div style={{ display: 'flex', gap: '12px' }}><button onClick={clearParseSession} style={s.outlineBtn}>Cancel</button><button onClick={() => { if (!operatorName) setOperatorName(localStorage.getItem('ag_admin_username') || ''); setShowConfirmModal(true); }} style={s.primaryBtn}>Proceed →</button></div>
           </div>
-          <div style={s.summaryGrid}>
-            <div style={s.summaryCard}><p>Valid Rows</p><h3>{stats.valid}</h3></div>
+          <div style={{...s.summaryGrid, gridTemplateColumns: '1fr 1fr 1fr 1fr'}}>
+            <div style={s.summaryCard}><p>Total Valid Rows</p><h3>{stats.valid}</h3></div>
             <div style={s.summaryCard}><p>Conflicts (Overwrite)</p><h3>{stats.conflicts}</h3></div>
+            <div style={s.summaryCard}><p>Couple Numbers</p><h3>{cCount} <span style={{fontSize:'0.6em', opacity:0.8}}>({cUnique} couples)</span></h3></div>
+            <div style={s.summaryCard}><p>Group Numbers</p><h3>{gCount} <span style={{fontSize:'0.6em', opacity:0.8}}>({gUnique} groups)</span></h3></div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {showConfirmModal && (
         <div className="modal-overlay">

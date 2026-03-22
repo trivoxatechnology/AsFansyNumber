@@ -1,0 +1,29 @@
+# Hostinger Production Configuration
+Options -Indexes
+RewriteEngine On
+AcceptPathInfo On
+
+# ── API ACCESS ──
+# Let PHP files run directly with path info
+RewriteRule ^api\.php(/.*)?$ - [L]
+RewriteRule ^config\.php - [F,L]
+
+# Block direct access to config for security
+<Files "config.php">
+  Order Allow,Deny
+  Deny from all
+</Files>
+
+# ── REACT ROUTING ──
+# Serve index.html for all non-file routes (React Router support)
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ /index.html [L]
+
+# ── CORS HEADERS ──
+# Allow direct access for local development and cross-origin tools
+<FilesMatch "api\.php$">
+  Header set Access-Control-Allow-Origin "*"
+  Header set Access-Control-Allow-Methods "GET, POST, OPTIONS"
+  Header set Access-Control-Allow-Headers "Content-Type, Authorization"
+</FilesMatch>

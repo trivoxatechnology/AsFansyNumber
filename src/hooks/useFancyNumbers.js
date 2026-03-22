@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
-
-const API_BASE = 'https://asfancynumber.com/fancy_number/api.php';
+import { getNumbers, getGroupsList, getCouples, getGroups } from '../api/client';
+import { classifyNumber } from '../utils/PatternEngine';
 
 export function useFancyNumbers() {
   const [rawNumbers, setRawNumbers] = useState([]);
@@ -14,45 +14,100 @@ export function useFancyNumbers() {
     category: '',
     pattern_type: '',
     digitSum: '',
-    maxPrice: 500000,
+    maxPrice: 10000000,
     sortOrder: 'default'
   });
 
   useEffect(() => {
     let isMounted = true;
-    const ctrl = new AbortController();
-    const opts = { signal: ctrl.signal };
     async function fetchData(background = false) {
       if (!background) setLoading(true);
       else setIsRefreshing(true);
       if (!background) setError(null);
       
       try {
-        const numRes = await fetch(`${API_BASE}/wp_fn_numbers?limit=10000`, opts);
+        const [res, couplesRes, groupsRes] = await Promise.all([
+          getNumbers({ limit: 2000 }),
+          getCouples().catch(() => []),
+          getGroups().catch(() => [])
+        ]);
+        
+        const soloNumbers = res.data || [];
+        
+        // Process Couple Bundles
+        const coupleBundles = (Array.isArray(couplesRes) ? couplesRes : []).map(c => ({
+          ...c,
+          is_bundle: true,
+          bundle_type: 'couple',
+          number_category: '7',
+          // Use bundle price for sorting/filter
+          base_price: c.couple_price,
+          offer_price: c.couple_offer_price,
+          mobile_number: `${c.number_1} & ${c.number_2}`, 
+          vip_score: 95
+        }));
 
-        if (!numRes.ok) {
-          throw new Error('Failed to fetch data from API');
-        }
-
-        let numsData = await numRes.json();
-
-        // Filter out draft/hidden numbers and expire old offers
-        const now = new Date();
-        numsData = numsData.filter(n => n.visibility_status !== '0' && n.visibility_status !== 0).map(n => {
-          if (n.offer_end_date && new Date(n.offer_end_date) < now) {
-            return { ...n, offer_price: null };
+        // Process Group Bundles
+        const groupMap = {};
+        (Array.isArray(groupsRes) ? groupsRes : []).forEach(g => {
+          if (!groupMap[g.group_id]) {
+            groupMap[g.group_id] = {
+              ...g,
+              is_bundle: true,
+              bundle_type: 'group',
+              number_category: '8',
+              base_price: g.group_price,
+              offer_price: g.group_offer_price,
+              numbers: [],
+              mobile_number: '',
+              vip_score: 90
+            };
           }
-          return n;
+          groupMap[g.group_id].numbers.push(g);
+          groupMap[g.group_id].mobile_number += (groupMap[g.group_id].mobile_number ? ' & ' : '') + g.mobile_number;
+        });
+        const groupBundles = Object.values(groupMap);
+        
+        // Track IDs that are already represented in a bundle to avoid duplicates
+        const bundledIds = new Set();
+        coupleBundles.forEach(c => { bundledIds.add(c.number_id_1); bundledIds.add(c.number_id_2); });
+        groupBundles.forEach(g => g.numbers.forEach(n => bundledIds.add(n.number_id)));
+
+        // Filter solo numbers to remove those that are already in an active bundle
+        const finalSolo = soloNumbers.filter(n => !bundledIds.has(n.number_id));
+
+        const now = new Date();
+        const processedSolo = finalSolo.map(n => {
+          const classification = classifyNumber(n.mobile_number);
+          const resolveCat = () => {
+             const cid = String(n.number_category);
+             if (cid === '7' || cid === '8') return cid;
+             const bt = String(n.bundle_type || '').toLowerCase();
+             if (bt.includes('couple') || n.couple_id) return '7';
+             if (bt.includes('group') || bt.includes('business') || n.group_id) return '8';
+             return classification.number_category;
+          };
+
+          const finalNum = {
+            ...classification,
+            ...n,
+            number_category: resolveCat()
+          };
+
+          if (n.offer_end_date && new Date(n.offer_end_date) < now) {
+            finalNum.offer_price = null;
+          }
+          return finalNum;
         });
 
+        const allItems = [...processedSolo, ...coupleBundles, ...groupBundles];
+
         if (isMounted) {
-          setRawNumbers(numsData);
+          setRawNumbers(allItems);
         }
       } catch (err) {
-        if (err?.name !== 'AbortError') {
-          console.error(err);
-          if (!background && isMounted) setError('Failed to load VIP numbers. Please try again later.');
-        }
+        console.error('API Error:', err);
+        if (isMounted) setError('Failed to load numbers.');
       } finally {
         if (isMounted) {
           setLoading(false);
@@ -71,7 +126,6 @@ export function useFancyNumbers() {
     return () => {
       isMounted = false;
       clearInterval(interval);
-      ctrl.abort();
     };
   }, []);
 
@@ -147,13 +201,30 @@ export function useFancyNumbers() {
 
     if (filters.category) {
       result = result.filter(n => {
-        const cat = String(n.number_category || '5');
-        return cat === String(filters.category);
+        const cid = String(n.number_category || n.category || '6');
+        if (cid === String(filters.category)) return true;
+        
+        // Check bundle/type if filtering for Couple (7) or Business (8)
+        if (filters.category === '7') {
+          return String(n.bundle_type).toLowerCase().includes('couple') || !!n.couple_id || String(n.category_type).toLowerCase().includes('couple');
+        }
+        if (filters.category === '8') {
+          return String(n.bundle_type).toLowerCase().includes('group') || String(n.bundle_type).toLowerCase().includes('business') || !!n.group_id || String(n.category_type).toLowerCase().includes('business');
+        }
+        
+        return false;
       });
     }
 
     if (filters.pattern_type) {
-      result = result.filter(n => String(n.pattern_type) === String(filters.pattern_type));
+      const pt = String(filters.pattern_type);
+      result = result.filter(n => {
+        // Match against all pattern-related fields to handle naming variations
+        return String(n.pattern_type) === pt
+          || String(n.pattern_name) === pt
+          || String(n.category_type) === pt
+          || String(n.sub_category) === pt;
+      });
     }
 
     if (filters.digitSum) {
@@ -200,7 +271,7 @@ export function useFancyNumbers() {
       category: '',
       pattern_type: '',
       digitSum: '',
-      maxPrice: 500000,
+      maxPrice: 10000000,
       sortOrder: 'default'
     });
   };

@@ -12,14 +12,19 @@ export const fetchWithAuth = async (url, options = {}) => {
     const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
 
     try {
+      const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+      const headers = {
+        'Authorization': `Bearer ${token}`,
+        ...options.headers,
+      };
+      if (!isFormData && !headers['Content-Type']) {
+        headers['Content-Type'] = 'application/json';
+      }
+
       const res = await fetch(url, {
         ...options,
         signal: options.signal || ctrl.signal,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-          ...options.headers,
-        },
+        headers,
       });
       clearTimeout(timer);
 

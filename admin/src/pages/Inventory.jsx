@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { getWithAuth, putWithAuth, postWithAuth, deleteWithAuth, safeJson } from '../utils/api';
 import { API_BASE } from '../config/api';
-import { CATEGORIES, PATTERN_TYPES } from '../utils/PatternEngine';
+import { CATEGORIES, PATTERN_TYPES, CATEGORY_LABELS } from '../utils/PatternEngine';
 
 import { useToast } from '../components/Toast';
 import { useOperator } from '../components/OperatorPrompt';
@@ -212,7 +212,10 @@ export default function Inventory() {
       Platinum: { bg: 'var(--platinum-bg)', text: 'var(--platinum-text)' },
       Gold: { bg: 'var(--gold-bg)', text: 'var(--gold-text)' },
       Silver: { bg: 'var(--silver-bg)', text: 'var(--silver-text)' },
-      Normal: { bg: 'var(--normal-bg)', text: 'var(--normal-text)' }
+      Bronze: { bg: 'var(--bronze-bg)', text: 'var(--bronze-text)' },
+      Normal: { bg: 'var(--normal-bg)', text: 'var(--normal-text)' },
+      Couple: { bg: 'var(--couple-bg)', text: 'var(--couple-text)' },
+      Business: { bg: 'var(--business-bg)', text: 'var(--business-text)' }
     };
     const style = colorMap[cat] || { bg: '#eee', text: '#666' };
     return (
@@ -280,7 +283,11 @@ export default function Inventory() {
             <label>Category</label>
             <select className="input" value={filters.category} onChange={e => setFilters({...filters, category: e.target.value})}>
               <option value="">All Categories</option>
-              {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+              {Object.entries(CATEGORY_LABELS).map(([id, label]) => (
+                <option key={id} value={id}>{label}</option>
+              ))}
+              <option value="7">Couple</option>
+              <option value="8">Business</option>
             </select>
           </div>
           <div className="form-group">

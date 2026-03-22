@@ -54,7 +54,7 @@ function validateRow(row, idx, existingSet) {
     number_status: status||'available',
     remarks: row.remarks||'',
     pattern_type: row.pattern_type || pattern.pattern_type,
-    category: row.category || pattern.category,
+    category: row.category || pattern.number_category,
     prefix: mobile ? mobile.slice(0,5) : '',
     suffix: mobile ? mobile.slice(5) : '',
     digit_sum: mobile ? mobile.split('').reduce((s,c)=>s+parseInt(c),0) : 0,
@@ -255,14 +255,20 @@ export default function ImportWorkspace() {
   const handleImport = () => {
     const dest = importDestination;
     const cleanRow = r => {
+      let finalCat = String(r.category || '');
+      if (finalCat.toLowerCase() === 'couple') finalCat = '7';
+      if (finalCat.toLowerCase() === 'business') finalCat = '8';
+      
       const payload = {
         ...r,
+        number_category: finalCat,
+        category_type: (finalCat === '7') ? 'Couple' : (finalCat === '8') ? 'Group' : r.category_type,
         inventory_source: fileName,
         visibility_status: dest === 'draft' ? '0' : '1',
       };
       // Strip all internal UI tracking properties before sending to API
       Object.keys(payload).forEach(k => {
-        if (k.startsWith('_')) delete payload[k];
+        if (k.startsWith('_') || k === 'category') delete payload[k];
       });
       return payload;
     };
