@@ -99,6 +99,8 @@ $public_routes = [
   'search',
   'group',
   'groups-list',
+  'couples',
+  'groups',
 ];
 
 $is_public = in_array($current_route, $public_routes)
@@ -203,6 +205,14 @@ switch ($route) {
         fn_route_groups_list($pdo);
         break;
 
+    case 'couples':
+        fn_route_couples($pdo);
+        break;
+
+    case 'groups':
+        fn_route_groups($pdo);
+        break;
+
     default:
         http_response_code(404);
         echo json_encode(["success" => false, "error" => "Route not found"]);
@@ -250,6 +260,55 @@ function fn_route_groups_list($pdo) {
         'data'    => $rows,
         'total'   => count($rows)
     ]);
+}
+
+function fn_route_couples($pdo) {
+    try {
+        $query = "SELECT cn.couple_id, cn.couple_label, cn.couple_price,
+                         cn.couple_offer_price, cn.couple_status,
+                         n1.mobile_number AS number_1,
+                         n1.base_price    AS price_1,
+                         n1.category_type AS category_1,
+                         n1.number_id     AS number_id_1,
+                         n2.mobile_number AS number_2,
+                         n2.base_price    AS price_2,
+                         n2.category_type AS category_2,
+                         n2.number_id     AS number_id_2,
+                         cn.updated_at
+                  FROM wp_fn_couple_numbers cn
+                  JOIN wp_fn_numbers n1 ON cn.number_id_1 = n1.number_id
+                  JOIN wp_fn_numbers n2 ON cn.number_id_2 = n2.number_id
+                  WHERE cn.visibility_status = 1
+                    AND cn.couple_status = 'available'
+                  ORDER BY cn.couple_id DESC";
+        $stmt = $pdo->query($query);
+        echo json_encode($stmt->fetchAll());
+    } catch (Exception $e) {
+        http_response_code(500);
+        echo json_encode(["success" => false, "error" => $e->getMessage()]);
+    }
+}
+
+function fn_route_groups($pdo) {
+    try {
+        $query = "SELECT g.group_id, g.group_name, g.group_type,
+                         g.group_price, g.group_offer_price, g.group_status,
+                         n.number_id, n.mobile_number, n.base_price,
+                         n.offer_price, n.category_type, n.number_status,
+                         m.sort_order
+                  FROM wp_fn_number_groups g
+                  JOIN wp_fn_number_group_members m ON m.group_id = g.group_id
+                  JOIN wp_fn_numbers n ON n.number_id = m.number_id
+                  WHERE g.visibility_status = 1
+                    AND g.group_status = 'available'
+                    AND n.number_status = 'available'
+                  ORDER BY g.group_id DESC, m.sort_order ASC";
+        $stmt = $pdo->query($query);
+        echo json_encode($stmt->fetchAll());
+    } catch (Exception $e) {
+        http_response_code(500);
+        echo json_encode(["success" => false, "error" => $e->getMessage()]);
+    }
 }
 
 function fn_route_numbers($pdo) {
