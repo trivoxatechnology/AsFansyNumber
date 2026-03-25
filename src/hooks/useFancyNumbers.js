@@ -198,10 +198,10 @@ export function useFancyNumbers() {
             return abab;
           });
         }
-      } else if (q.includes('*')) {
-        // Handle User Wildcard Searching (e.g. *786* or ****9999)
-        // Convert the * into a Regex wildcard (.*)
-        const regexPattern = new RegExp('^' + q.replace(/\*/g, '.*') + '$', 'i');
+      } else if (q.includes('*') || q.includes('_')) {
+        // Handle User Wildcard & Positional Searching (e.g. *786* or _9________)
+        // Convert the * and _ into regex wildcard (.)
+        const regexPattern = new RegExp('^' + q.replace(/[\*_]/g, '.') + '$', 'i');
         result = result.filter(n => regexPattern.test(String(n.mobile_number)));
       } else {
         // Default standard inclusion

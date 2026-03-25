@@ -53,7 +53,7 @@ export default function GroupCard({ item, selectedIds, onToggleCheck, calculated
         boxSizing: 'border-box',
         gap: '14px',
         gridColumn: 'span 2',
-        minWidth: '300px'
+        width: '100%'
       }}
     >
       {allSelected && hasOffer && (
@@ -136,8 +136,9 @@ export default function GroupCard({ item, selectedIds, onToggleCheck, calculated
 
         <button
           onClick={handleBuySelected}
+          className={`add-btn ${inCartAll ? 'added' : ''}`}
           style={{
-            background: 'linear-gradient(135deg, var(--business), #e6c200)',
+            background: inCartAll ? 'var(--success)' : 'linear-gradient(135deg, var(--business), #e6c200)',
             color: '#000',
             border: 'none', borderRadius: '12px', padding: '14px 28px',
             fontFamily: "var(--font-body)", fontWeight: 700, cursor: 'pointer',

@@ -61,7 +61,7 @@ export default function CoupleCard({ item, onToggleCart, isItemInCart }) {
         boxSizing: 'border-box',
         gap: '20px',
         gridColumn: 'span 2', // Take double width in grid if possible
-        minWidth: '340px'
+        width: '100%'
       }}
     >
       {hasOffer && (
@@ -109,6 +109,7 @@ export default function CoupleCard({ item, onToggleCart, isItemInCart }) {
                 <span style={{ fontSize: '12px', color: 'var(--muted)' }}>{formatPrice(item.price_1)}</span>
                 <button 
                   onClick={() => onToggleCart({ number_id: item.number_id_1, mobile_number: item.number_1, base_price: item.price_1 })}
+                  className={`add-btn ${inCart1 ? 'added' : ''}`}
                   style={{ 
                     background: inCart1 ? 'var(--success)' : 'var(--bg3)', 
                     border: 'none', borderRadius: '6px', padding: '4px 8px', 
@@ -131,6 +132,7 @@ export default function CoupleCard({ item, onToggleCart, isItemInCart }) {
                 <span style={{ fontSize: '12px', color: 'var(--muted)' }}>{formatPrice(item.price_2)}</span>
                 <button 
                   onClick={() => onToggleCart({ number_id: item.number_id_2, mobile_number: item.number_2, base_price: item.price_2 })}
+                  className={`add-btn ${inCart2 ? 'added' : ''}`}
                   style={{ 
                     background: inCart2 ? 'var(--success)' : 'var(--bg3)', 
                     border: 'none', borderRadius: '6px', padding: '4px 8px', 
@@ -161,6 +163,7 @@ export default function CoupleCard({ item, onToggleCart, isItemInCart }) {
         <button 
           onClick={handleBuyBoth}
           disabled={inCartBoth}
+          className={`add-btn ${inCartBoth ? 'added' : ''}`}
           style={{
             background: inCartBoth ? 'var(--success)' : 'linear-gradient(135deg, var(--couple), #fff)',
             color: inCartBoth ? '#fff' : '#000',

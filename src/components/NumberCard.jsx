@@ -80,8 +80,7 @@ export default function NumberCard({ item, onToggleCart, inCart, compact = false
         flexDirection: 'column',
         height: '100%',
         boxSizing: 'border-box',
-        minWidth: compact ? '260px' : '300px',
-        flexShrink: compact ? 0 : 1
+        width: '100%'
       }}
     >
       {hasOffer && (

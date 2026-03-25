@@ -34,7 +34,14 @@ const CATEGORY_OPTIONS = [
 ];
 
 export default function Hero({ filters, onFilterChange, onReset, allNumbers = [] }) {
-  const [searchInput, setSearchInput] = useState(filters?.query || '');
+  const parseQueryToDigits = (q) => {
+    if (!q) return Array(10).fill('*');
+    if (q.length === 10) return q.split('').map(c => (c === '_' || c === '*') ? '*' : c);
+    return Array(10).fill('*');
+  };
+
+  const [digits, setDigits] = useState(() => parseQueryToDigits(filters?.query));
+  const inputRefs = useRef([]);
   const [showFilters, setShowFilters] = useState(false);
   const filterRef = useRef(null);
   const dynamicStats = useMemo(() => {
@@ -73,12 +80,74 @@ export default function Hero({ filters, onFilterChange, onReset, allNumbers = []
   }, [allNumbers]);
 
   useEffect(() => {
-    setSearchInput(filters?.query || '');
+    setDigits(parseQueryToDigits(filters?.query));
   }, [filters?.query]);
 
-  const handleSearch = () => {
-    if (onFilterChange) onFilterChange('query', searchInput);
-    // Smooth scroll to results
+  const handleDigitChange = (index, val) => {
+    const cleaned = val.replace(/\D/g, '');
+
+    const newDigits = [...digits];
+
+    // Handle paste
+    if (cleaned.length > 1) {
+      for (let i = 0; i < cleaned.length; i++) {
+        if (index + i < 10) newDigits[index + i] = cleaned[i];
+      }
+      setDigits(newDigits);
+      const nextIdx = Math.min(index + cleaned.length, 9);
+      if (inputRefs.current[nextIdx]) {
+        inputRefs.current[nextIdx].focus();
+      }
+      return;
+    }
+
+    newDigits[index] = cleaned;
+    setDigits(newDigits);
+
+    if (cleaned && index < 9) {
+      if (inputRefs.current[index + 1]) {
+        inputRefs.current[index + 1].focus();
+      }
+    }
+  };
+
+  const handleDigitKeyDown = (index, e) => {
+    if (e.key === 'Backspace' && digits[index] === '' && index > 0) {
+      if (inputRefs.current[index - 1]) {
+        inputRefs.current[index - 1].focus();
+      }
+    } else if (e.key === 'Enter') {
+      executeSearch();
+    }
+  };
+
+  const handleDigitFocus = (index, e) => {
+    e.target.style.borderBottomColor = 'var(--primary)';
+    if (digits[index] === '*') {
+      const newDigits = [...digits];
+      newDigits[index] = '';
+      setDigits(newDigits);
+    } else {
+      e.target.select();
+    }
+  };
+
+  const handleDigitBlur = (index, e) => {
+    e.target.style.borderBottomColor = 'var(--border)';
+    if (digits[index] === '') {
+      const newDigits = [...digits];
+      newDigits[index] = '*';
+      setDigits(newDigits);
+    }
+  };
+
+  const executeSearch = () => {
+    if (digits.every(d => d === '*')) {
+      if (onFilterChange) onFilterChange('query', '');
+    } else {
+      const q = digits.join('');
+      if (onFilterChange) onFilterChange('query', q);
+    }
     const results = document.querySelector('main');
     if (results) results.scrollIntoView({ behavior: 'smooth' });
   };
@@ -104,21 +173,40 @@ export default function Hero({ filters, onFilterChange, onReset, allNumbers = []
           Expertly curated patterns for those who demand distinction.
         </p>
 
+        <div style={{ marginBottom: '12px', color: 'var(--muted)', fontSize: '13px', letterSpacing: '0.04em' }}>
+          Enter digits in specific positions to find exact matches:
+        </div>
         <div style={styles.searchContainer} ref={filterRef}>
-          <div style={styles.searchBox}>
-            <div style={styles.searchIcon}><Search size={18} /></div>
-            <input
-              type="text"
-              placeholder="Search by pattern (e.g. 9999, *786*, 0000*)"
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-              style={styles.input}
-            />
-            <button style={styles.filterBtn} onClick={() => setShowFilters(!showFilters)}>
+          <div className="search-box-container" style={{ ...styles.searchBox, padding: '12px', gap: '16px', alignItems: 'center' }}>
+            <div className="digit-inputs-container" style={{ display: 'flex', gap: '6px', flex: 1, justifyContent: 'center' }}>
+              {digits.map((digit, i) => (
+                <input 
+                  key={i}
+                  ref={el => inputRefs.current[i] = el}
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={10}
+                  value={digit}
+                  onChange={e => handleDigitChange(i, e.target.value)}
+                  onKeyDown={e => handleDigitKeyDown(i, e)}
+                  className="digit-box"
+                  style={{
+                    width: '40px', height: '52px',
+                    textAlign: 'center', fontSize: '24px', fontFamily: "var(--font-number)", fontWeight: 600,
+                    background: 'transparent', border: 'none', borderBottom: '2px solid var(--border)',
+                    borderRadius: '0', color: '#fff', outline: 'none', transition: 'border-color 0.2s, color 0.2s',
+                    padding: '0 0 4px 0'
+                  }}
+                  onFocus={(e) => handleDigitFocus(i, e)}
+                  onBlur={(e) => handleDigitBlur(i, e)}
+                />
+              ))}
+            </div>
+            
+            <button style={{...styles.filterBtn, padding: '0 16px', height: '52px'}} onClick={() => setShowFilters(!showFilters)}>
               <Filter size={16} /> Filters
             </button>
-            <button style={styles.searchBtn} onClick={handleSearch}>
+            <button style={{...styles.searchBtn, padding: '0 24px', height: '52px'}} onClick={executeSearch}>
               Search
             </button>
           </div>
@@ -131,7 +219,7 @@ export default function Hero({ filters, onFilterChange, onReset, allNumbers = []
                 <button style={styles.closeBtn} onClick={() => setShowFilters(false)}><X size={16}/></button>
               </div>
               
-              <div style={styles.filterGrid}>
+              <div className="filter-grid-mobile" style={styles.filterGrid}>
                 <div style={styles.group}>
                   <label style={styles.label}>Tier / Ranking</label>
                   <select style={styles.select} value={filters?.category || ''} onChange={(e) => onFilterChange('category', e.target.value)}>

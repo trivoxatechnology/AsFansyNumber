@@ -73,24 +73,27 @@ function RenderCard({ item, isItemInCart, onToggleCart, compact }) {
 
 // ── Two-row horizontal scroll row per category ───────────────────────────────
 function ScrollRow({ cat, items, isItemInCart, onToggleCart, onSeeAll }) {
-  const scrollRef = useRef(null);
+  const scrollRef1 = useRef(null);
+  const scrollRef2 = useRef(null);
 
-  const scroll = (dir) => {
-    if (!scrollRef.current) return;
-    scrollRef.current.scrollBy({ left: dir * 460, behavior: 'smooth' });
+  const scroll1 = (dir) => {
+    if (!scrollRef1.current) return;
+    scrollRef1.current.scrollBy({ left: dir * 460, behavior: 'smooth' });
   };
 
-  // Split items into two rows: odd indices → row 1, even → row 2
-  // Each column = one card from row1 + one card from row2 stacked
+  const scroll2 = (dir) => {
+    if (!scrollRef2.current) return;
+    scrollRef2.current.scrollBy({ left: dir * 460, behavior: 'smooth' });
+  };
+
   const VISIBLE = 48; // 24 per row × 2 rows
   const visibleItems = items.slice(0, VISIBLE);
   const row1 = visibleItems.filter((_, i) => i % 2 === 0);
   const row2 = visibleItems.filter((_, i) => i % 2 === 1);
-  // Zip into columns so they scroll together
-  const columns = row1.map((item, colIdx) => ({
-    top: item,
-    bottom: row2[colIdx] || null,
-  }));
+
+  const isCouple = cat.id === '7';
+  const isGroup = cat.id === '8';
+  const colWidth = isCouple ? '400px' : isGroup ? '360px' : '320px';
 
   return (
     <div id={`section-${cat.cls}`} className="section-row">
@@ -104,33 +107,48 @@ function ScrollRow({ cat, items, isItemInCart, onToggleCart, onSeeAll }) {
         <button className="see-all" onClick={() => onSeeAll(cat.id)} style={{ fontFamily: "var(--font-heading)", fontStyle: 'italic', fontWeight: 400, fontSize: '14px', background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer' }}>Explore All →</button>
       </div>
 
+      {/* First Row Scroll Container */}
       <div style={rowStyles.scrollWrapper}>
-        <button style={rowStyles.arrowBtnLeft} onClick={() => scroll(-1)}><ChevronLeft size={18} /></button>
+        <button style={rowStyles.arrowBtnLeft} onClick={() => scroll1(-1)}><ChevronLeft size={18} /></button>
 
-        {/* Two-row scrollable grid */}
-        <div ref={scrollRef} style={rowStyles.scrollContainer}>
-          {columns.map((col, colIdx) => (
-            <div key={colIdx} style={rowStyles.column}>
-              <div style={rowStyles.cardSlot}>
-                <RenderCard item={col.top} isItemInCart={isItemInCart} onToggleCart={onToggleCart} compact />
-              </div>
-              {col.bottom && (
-                <div style={rowStyles.cardSlot}>
-                  <RenderCard item={col.bottom} isItemInCart={isItemInCart} onToggleCart={onToggleCart} compact />
-                </div>
-              )}
+        <div ref={scrollRef1} style={rowStyles.scrollContainer}>
+          {row1.map((item, idx) => (
+            <div key={`r1-${item.number_id || item.id || idx}`} style={{ flexShrink: 0, width: colWidth }}>
+              <RenderCard item={item} isItemInCart={isItemInCart} onToggleCart={onToggleCart} compact />
             </div>
           ))}
-
-          {items.length > VISIBLE && (
-            <div style={rowStyles.moreBadge} onClick={() => onSeeAll(cat.id)}>
+          {/* If there's no row 2 but more items, explore badge goes here */}
+          {items.length > VISIBLE && row2.length === 0 && (
+            <div style={{...rowStyles.moreBadge, width: colWidth }} onClick={() => onSeeAll(cat.id)}>
               Explore All {items.length} <br /> {cat.label} Numbers
             </div>
           )}
         </div>
 
-        <button style={rowStyles.arrowBtnRight} onClick={() => scroll(1)}><ChevronRight size={18} /></button>
+        <button style={rowStyles.arrowBtnRight} onClick={() => scroll1(1)}><ChevronRight size={18} /></button>
       </div>
+
+      {/* Second Row Scroll Container */}
+      {row2.length > 0 && (
+        <div style={{...rowStyles.scrollWrapper, marginTop: '30px'}}>
+          <button style={rowStyles.arrowBtnLeft} onClick={() => scroll2(-1)}><ChevronLeft size={18} /></button>
+
+          <div ref={scrollRef2} style={rowStyles.scrollContainer}>
+            {row2.map((item, idx) => (
+              <div key={`r2-${item.number_id || item.id || idx}`} style={{ flexShrink: 0, width: colWidth }}>
+                <RenderCard item={item} isItemInCart={isItemInCart} onToggleCart={onToggleCart} compact />
+              </div>
+            ))}
+            {items.length > VISIBLE && (
+              <div style={{...rowStyles.moreBadge, width: colWidth }} onClick={() => onSeeAll(cat.id)}>
+                Explore All {items.length} <br /> {cat.label} Numbers
+              </div>
+            )}
+          </div>
+
+          <button style={rowStyles.arrowBtnRight} onClick={() => scroll2(1)}><ChevronRight size={18} /></button>
+        </div>
+      )}
     </div>
   );
 }
@@ -261,16 +279,35 @@ function App() {
     return saved ? JSON.parse(saved) : [];
   });
   const [isCartOpen, setIsCartOpen] = useState(false);
-  const [showLoader, setShowLoader] = useState(true);
-  const [animDone, setAnimDone] = useState(false);
+  const [showLoader, setShowLoader] = useState(() => {
+    let isReload = false;
+    if (typeof window !== 'undefined' && window.performance) {
+      const navEntries = window.performance.getEntriesByType('navigation');
+      if (navEntries.length > 0) {
+        isReload = navEntries[0].type === 'reload';
+      } else if (window.performance.navigation) {
+        isReload = window.performance.navigation.type === 1;
+      }
+    }
+    if (isReload) return true;
+    if (!sessionStorage.getItem('fn_visited')) {
+      sessionStorage.setItem('fn_visited', 'true');
+      return true;
+    }
+    return false;
+  });
+  
+  const [animDone, setAnimDone] = useState(!showLoader);
   const loaderTimerRef = useRef(null);
 
   const hasActiveFilters = filters.query || filters.category || filters.pattern_name || filters.digitSum || filters.maxPrice < 10000000;
 
   useEffect(() => {
-    loaderTimerRef.current = setTimeout(() => setAnimDone(true), 3500);
+    if (showLoader) {
+      loaderTimerRef.current = setTimeout(() => setAnimDone(true), 3500);
+    }
     return () => clearTimeout(loaderTimerRef.current);
-  }, []);
+  }, [showLoader]);
 
   useEffect(() => {
     if (animDone && !loading) setShowLoader(false);
@@ -322,14 +359,14 @@ function App() {
             </div>
           ) : hasActiveFilters ? (
             <>
-              <div style={appStyles.sectionHeader}>
+              <div className="results-header" style={appStyles.sectionHeader}>
                 <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 600 }}>
                   {filters.query ? `Results for "${filters.query}"` : 'Refined Selection'}
                   <span style={{ fontSize: '12px', color: 'var(--muted)', fontWeight: 500, marginLeft: '12px' }}>
                     ({numbers.length.toLocaleString()} found)
                   </span>
                 </h2>
-                <div style={{ display: 'flex', gap: '12px' }}>
+                <div className="sort-container-mobile" style={{ display: 'flex', gap: '12px' }}>
                   <select
                     style={appStyles.sortSelect}
                     value={filters.sortOrder}
@@ -449,9 +486,9 @@ const rowStyles = {
   scrollContainer: {
     display: 'flex',
     flexDirection: 'row',
-    gap: '16px',
+    gap: '24px',
     overflowX: 'auto',
-    padding: '10px 0 20px',
+    padding: '20px 4px 30px 4px',
     scrollbarWidth: 'none',
     msOverflowStyle: 'none',
     WebkitOverflowScrolling: 'touch',
@@ -461,7 +498,7 @@ const rowStyles = {
   column: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '16px',
+    gap: '24px',
     flexShrink: 0,
     alignItems: 'stretch',
   },
