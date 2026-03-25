@@ -1,0 +1,33 @@
+/* 
+  FINAL LITE SCHEMA CLEANUP 
+  Reduces table to 19 essential columns.
+*/
+
+ALTER TABLE `wp_fn_numbers` 
+  DROP COLUMN IF EXISTS `vip_score`,
+  DROP COLUMN IF EXISTS `upload_batch_id`,
+  DROP COLUMN IF EXISTS `offer_start_date`,
+  DROP COLUMN IF EXISTS `platform_commission`,
+  DROP COLUMN IF EXISTS `remarks`,
+  DROP COLUMN IF EXISTS `created_at`,
+  DROP COLUMN IF EXISTS `batch_file_name`,
+  DROP COLUMN IF EXISTS `group_position`,
+  DROP COLUMN IF EXISTS `sub_category`,
+  DROP COLUMN IF EXISTS `category_type`,
+  DROP COLUMN IF EXISTS `pattern_type`,
+  DROP COLUMN IF EXISTS `pattern_code`,
+  DROP COLUMN IF EXISTS `number_type`,
+  DROP COLUMN IF EXISTS `repeat_count`,
+  DROP COLUMN IF EXISTS `auto_detected`,
+  DROP COLUMN IF EXISTS `pattern_category`,
+  DROP COLUMN IF EXISTS `all_patterns`,
+  DROP COLUMN IF EXISTS `is_vip`,
+  DROP COLUMN IF EXISTS `is_fancy`;
+
+/* Optimal Indexing for the Lite Schema */
+ALTER TABLE `wp_fn_numbers` 
+  ADD INDEX IF NOT EXISTS `idx_price` (`base_price`),
+  ADD INDEX IF NOT EXISTS `idx_dealer` (`dealer_id`),
+  ADD INDEX IF NOT EXISTS `idx_cat_status` (`number_category`, `number_status`);
+
+SELECT 'SUCCESS: Database simplified to 19-column Lite schema.' as Result;

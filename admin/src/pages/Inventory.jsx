@@ -83,8 +83,8 @@ export default function Inventory() {
       const num = String(item.mobile_number).toLowerCase();
       if (s && !num.includes(s)) return false;
 
-      if (filters.category && item.category !== filters.category) return false;
-      if (filters.pattern && item.pattern_type !== filters.pattern) return false;
+      if (filters.category && item.number_category !== filters.category) return false;
+      if (filters.pattern && item.pattern_name !== filters.pattern) return false;
       if (filters.status && item.number_status !== filters.status) return false;
       if (filters.dealer && String(item.dealer_id) !== String(filters.dealer)) return false;
 
@@ -206,7 +206,8 @@ export default function Inventory() {
     );
   };
 
-  const renderCategoryBadge = (cat) => {
+  const renderCategoryBadge = (catId) => {
+    const label = CATEGORY_LABELS[catId] || catId;
     const colorMap = {
       Diamond: { bg: 'var(--diamond-bg)', text: 'var(--diamond-text)' },
       Platinum: { bg: 'var(--platinum-bg)', text: 'var(--platinum-text)' },
@@ -217,14 +218,14 @@ export default function Inventory() {
       Couple: { bg: 'var(--couple-bg)', text: 'var(--couple-text)' },
       Business: { bg: 'var(--business-bg)', text: 'var(--business-text)' }
     };
-    const style = colorMap[cat] || { bg: '#eee', text: '#666' };
+    const style = colorMap[label] || { bg: '#eee', text: '#666' };
     return (
       <span style={{ 
         padding: '4px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 700,
         background: style.bg, color: style.text,
         border: `1px solid rgba(0,0,0,0.05)`
       }}>
-        {cat}
+        {label}
       </span>
     );
   };
@@ -402,9 +403,9 @@ export default function Inventory() {
                         />
                       </div>
                     </td>
-                    <td>{renderCategoryBadge(item.category)}</td>
+                    <td>{renderCategoryBadge(item.number_category)}</td>
                     <td>
-                      <span style={{ fontSize: '11px', color: '#888', fontWeight: 600 }}>{item.pattern_type || '-'}</span>
+                      <span style={{ fontSize: '11px', color: '#888', fontWeight: 600 }}>{item.pattern_name || '-'}</span>
                     </td>
                     <td style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>

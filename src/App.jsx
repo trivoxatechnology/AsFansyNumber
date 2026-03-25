@@ -7,38 +7,90 @@ import GroupCard from './components/GroupCard';
 import CartModal from './components/CartModal';
 import Loader from './components/Loader';
 import AdPopup from './components/AdPopup';
+import CouplesSection from './components/CouplesSection';
+import GroupsSection from './components/GroupsSection';
 import { useFancyNumbers } from './hooks/useFancyNumbers';
 import { Ghost, Loader2, ChevronLeft, ChevronRight, LayoutGrid, List } from 'lucide-react';
 import './index.css';
 
 // ── Category / Pattern config ────────────────────────────────────────────────
 const CATEGORIES = [
-  { id: '1', label: 'Diamond',  emoji: '💎', cls: 'diamond',  sub: 'Mirror · Palindrome · Full Symmetry · Hexa · Single Digit Repeating' },
+  { id: '1', label: 'Diamond', emoji: '💎', cls: 'diamond', sub: 'Mirror · Palindrome · Full Symmetry · Hexa · Single Digit Repeating' },
   { id: '2', label: 'Platinum', emoji: '💍', cls: 'platinum', sub: 'Penta · XYXYXY · Tetra · xyzxyz' },
-  { id: '3', label: 'Gold',     emoji: '⭐', cls: 'gold',     sub: '786 · Doubling · ABAB-XYXY · Numerology' },
-  { id: '4', label: 'Silver',   emoji: '🥈', cls: 'silver',   sub: 'Sequential · 000 Series · 13 Special · xyxy Pattern' },
-  { id: '5', label: 'Bronze',   emoji: '🥉', cls: 'bronze',   sub: 'Minimum Digit · Special Characters' },
-  { id: '7', label: 'Couple',   emoji: '👫', cls: 'couple',   sub: 'Matching Pairs · Consecutive Sequence Pairs' },
-  { id: '8', label: 'Business', emoji: '💼', cls: 'business', sub: 'Group Numbers · Corporate Series · Easy Recall' },
-  { id: '6', label: 'Normal',   emoji: '📱', cls: 'normal',   sub: 'Daily Use · Budget Friendly · Clean Numbers' },
+  { id: '3', label: 'Gold', emoji: '⭐', cls: 'gold', sub: '786 · Doubling · ABAB-XYXY · Numerology' },
+  { id: '4', label: 'Silver', emoji: '🥈', cls: 'silver', sub: 'Sequential · 000 Series · 13 Special · xyxy Pattern' },
+  { id: '5', label: 'Bronze', emoji: '🥉', cls: 'bronze', sub: 'Minimum Digit · Special Characters' },
+  { id: '7', label: 'Couple', emoji: '👫', cls: 'couple', sub: 'Matching Pairs · Consecutive Pairs · Special Sets' },
+  { id: '8', label: 'Business', emoji: '💼', cls: 'business', sub: 'Corporate Sets · Team Bundles · Sequential Groups' },
+  { id: '6', label: 'Normal', emoji: '📱', cls: 'normal', sub: 'Daily Use · Budget Friendly · Clean Numbers' },
 ];
 
 const PATTERNS = [
-  { type: 'Mirror',      label: 'Mirror Numbers' },
-  { type: '786',         label: '🕌 786 Lucky' },
-  { type: 'Numerology',  label: '🔢 Numerology' },
-  { type: 'Repeating',   label: 'Repeating' },
-  { type: 'XYXYXY',      label: 'XYXYXY' },
+  { type: 'Mirror', label: 'Mirror Numbers' },
+  { type: '786', label: '🕌 786 Lucky' },
+  { type: 'Numerology', label: '🔢 Numerology' },
+  { type: 'Repeating', label: 'Repeating' },
+  { type: 'XYXYXY', label: 'XYXYXY' },
 ];
 
-// ── Horizontal scroll row ────────────────────────────────────────────────────
+// ── Renders a single card (number, couple, or group) ─────────────────────────
+function RenderCard({ item, isItemInCart, onToggleCart, compact }) {
+  if (item.is_bundle) {
+    if (item.bundle_type === 'couple') {
+      return (
+        <CoupleCard
+          key={`couple-${item.couple_id}`}
+          item={item}
+          isItemInCart={isItemInCart}
+          onToggleCart={onToggleCart}
+        />
+      );
+    }
+    if (item.bundle_type === 'group') {
+      return (
+        <GroupCard
+          key={`group-${item.group_id}`}
+          item={item}
+          selectedIds={[]}
+          onToggleCheck={() => {}}
+          calculatedPrice={item.group_offer_price ? parseFloat(item.group_offer_price) : parseFloat(item.group_price || 0)}
+          isItemInCart={isItemInCart}
+          onToggleCart={onToggleCart}
+        />
+      );
+    }
+  }
+  return (
+    <NumberCard
+      key={item.number_id || item.id}
+      item={item}
+      compact={compact}
+      inCart={isItemInCart(item.number_id || item.id)}
+      onToggleCart={onToggleCart}
+    />
+  );
+}
+
+// ── Two-row horizontal scroll row per category ───────────────────────────────
 function ScrollRow({ cat, items, isItemInCart, onToggleCart, onSeeAll }) {
   const scrollRef = useRef(null);
-  
+
   const scroll = (dir) => {
     if (!scrollRef.current) return;
     scrollRef.current.scrollBy({ left: dir * 460, behavior: 'smooth' });
   };
+
+  // Split items into two rows: odd indices → row 1, even → row 2
+  // Each column = one card from row1 + one card from row2 stacked
+  const VISIBLE = 48; // 24 per row × 2 rows
+  const visibleItems = items.slice(0, VISIBLE);
+  const row1 = visibleItems.filter((_, i) => i % 2 === 0);
+  const row2 = visibleItems.filter((_, i) => i % 2 === 1);
+  // Zip into columns so they scroll together
+  const columns = row1.map((item, colIdx) => ({
+    top: item,
+    bottom: row2[colIdx] || null,
+  }));
 
   return (
     <div id={`section-${cat.cls}`} className="section-row">
@@ -51,49 +103,32 @@ function ScrollRow({ cat, items, isItemInCart, onToggleCart, onSeeAll }) {
         <span className="section-count" style={{ fontFamily: "var(--font-body)", fontSize: '12px', fontWeight: 500 }}>{items.length.toLocaleString('en-IN')} numbers</span>
         <button className="see-all" onClick={() => onSeeAll(cat.id)} style={{ fontFamily: "var(--font-heading)", fontStyle: 'italic', fontWeight: 400, fontSize: '14px', background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer' }}>Explore All →</button>
       </div>
-      
+
       <div style={rowStyles.scrollWrapper}>
         <button style={rowStyles.arrowBtnLeft} onClick={() => scroll(-1)}><ChevronLeft size={18} /></button>
-        <div ref={scrollRef} className="cards-grid" style={rowStyles.scrollContainer}>
-          {items.slice(0, 24).map(item => {
-            if (item.is_bundle) {
-              if (item.bundle_type === 'couple') {
-                return (
-                  <CoupleCard
-                    key={`couple-${item.couple_id}`}
-                    item={item}
-                    isItemInCart={isItemInCart}
-                    onToggleCart={onToggleCart}
-                  />
-                );
-              }
-              if (item.bundle_type === 'group') {
-                return (
-                  <GroupCard
-                    key={`group-${item.group_id}`}
-                    item={item}
-                    isItemInCart={isItemInCart}
-                    onToggleCart={onToggleCart}
-                  />
-                );
-              }
-            }
-            return (
-              <NumberCard
-                key={item.number_id || item.id}
-                item={item}
-                compact
-                inCart={isItemInCart(item.number_id || item.id)}
-                onToggleCart={onToggleCart}
-              />
-            );
-          })}
-          {items.length > 24 && (
+
+        {/* Two-row scrollable grid */}
+        <div ref={scrollRef} style={rowStyles.scrollContainer}>
+          {columns.map((col, colIdx) => (
+            <div key={colIdx} style={rowStyles.column}>
+              <div style={rowStyles.cardSlot}>
+                <RenderCard item={col.top} isItemInCart={isItemInCart} onToggleCart={onToggleCart} compact />
+              </div>
+              {col.bottom && (
+                <div style={rowStyles.cardSlot}>
+                  <RenderCard item={col.bottom} isItemInCart={isItemInCart} onToggleCart={onToggleCart} compact />
+                </div>
+              )}
+            </div>
+          ))}
+
+          {items.length > VISIBLE && (
             <div style={rowStyles.moreBadge} onClick={() => onSeeAll(cat.id)}>
-              Explore All {items.length} <br/> {cat.label} Numbers
+              Explore All {items.length} <br /> {cat.label} Numbers
             </div>
           )}
         </div>
+
         <button style={rowStyles.arrowBtnRight} onClick={() => scroll(1)}><ChevronRight size={18} /></button>
       </div>
     </div>
@@ -104,17 +139,17 @@ import { getHomepageRows } from './api/client';
 import { classifyNumber } from './utils/PatternEngine';
 
 // ── Home showcase: categories + patterns ─────────────────────────────────────
-function HomeShowcase({ isItemInCart, onToggleCart, onSeeAll }) {
-  const { allNumbers, loading } = useFancyNumbers();
+// FIX: allNumbers is now correctly passed as a prop and used for categorisation
+function HomeShowcase({ allNumbers, loading, isItemInCart, onToggleCart, onSeeAll }) {
   const [rowItems, setRowItems] = useState({});
 
   useEffect(() => {
-    if (loading || !allNumbers.length) return;
-    
+    if (loading || !allNumbers || !allNumbers.length) return;
+
     const newRowItems = { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [], 8: [] };
-    
+
     allNumbers.forEach(n => {
-      const cat = String(n.number_category);
+      const cat = String(n.number_category || n.category || '6');
       if (newRowItems[cat]) newRowItems[cat].push(n);
       else newRowItems['6'].push(n);
     });
@@ -123,8 +158,6 @@ function HomeShowcase({ isItemInCart, onToggleCart, onSeeAll }) {
   }, [allNumbers, loading]);
 
   if (loading && !Object.keys(rowItems).length) return null;
-
-  if (loading) return null;
 
   return (
     <div>
@@ -148,14 +181,46 @@ function HomeShowcase({ isItemInCart, onToggleCart, onSeeAll }) {
 
 // ── Grid view (when filters are active) ──────────────────────────────────────
 function FilteredGrid({ numbers, isItemInCart, onToggleCart }) {
+  const [selectedIds, setSelectedIds] = useState({});
+
+  const handleToggleCheck = (groupId, numberId) => {
+    if (!groupId) return;
+    setSelectedIds(prev => {
+      const current = prev[groupId] || [];
+      const isSelected = current.includes(numberId);
+      return {
+        ...prev,
+        [groupId]: isSelected 
+          ? current.filter(id => id !== numberId)
+          : [...current, numberId]
+      };
+    });
+  };
+
+  const getPrice = (group) => {
+    if (!group) return 0;
+    const gid = group.group_id || group.id;
+    const ids = selectedIds[gid] || [];
+    if (ids.length === 0) return parseFloat(group.group_price || 0);
+    const selected = (group.numbers || []).filter(n => ids.includes(n.number_id));
+    const total = selected.reduce((sum, n) => sum + parseFloat(n.base_price || 0), 0);
+    const allSelected = ids.length > 0 && ids.length === (group.numbers || []).length;
+    return (allSelected && group.group_offer_price) ? parseFloat(group.group_offer_price) : total;
+  };
+
+  if (!Array.isArray(numbers)) return null;
+
   return (
     <div className="cards-grid" style={{ marginTop: '20px' }}>
       {numbers.map(item => {
+        const itemId = item.group_id || item.number_id || item.id;
+        if (!itemId) return null;
+
         if (item.is_bundle) {
           if (item.bundle_type === 'couple') {
             return (
               <CoupleCard
-                key={`couple-${item.couple_id}`}
+                key={`couple-${itemId}`}
                 item={item}
                 isItemInCart={isItemInCart}
                 onToggleCart={onToggleCart}
@@ -165,8 +230,11 @@ function FilteredGrid({ numbers, isItemInCart, onToggleCart }) {
           if (item.bundle_type === 'group') {
             return (
               <GroupCard
-                key={`group-${item.group_id}`}
+                key={`group-${itemId}`}
                 item={item}
+                selectedIds={selectedIds[itemId] || []}
+                onToggleCheck={(numId) => handleToggleCheck(itemId, numId)}
+                calculatedPrice={getPrice(item)}
                 isItemInCart={isItemInCart}
                 onToggleCart={onToggleCart}
               />
@@ -175,9 +243,9 @@ function FilteredGrid({ numbers, isItemInCart, onToggleCart }) {
         }
         return (
           <NumberCard
-            key={item.number_id || item.id}
+            key={itemId}
             item={item}
-            inCart={isItemInCart(item.number_id || item.id)}
+            inCart={isItemInCart(itemId)}
             onToggleCart={onToggleCart}
           />
         );
@@ -197,7 +265,7 @@ function App() {
   const [animDone, setAnimDone] = useState(false);
   const loaderTimerRef = useRef(null);
 
-  const hasActiveFilters = filters.query || filters.category || filters.pattern_type || filters.digitSum || filters.maxPrice < 10000000;
+  const hasActiveFilters = filters.query || filters.category || filters.pattern_name || filters.digitSum || filters.maxPrice < 10000000;
 
   useEffect(() => {
     loaderTimerRef.current = setTimeout(() => setAnimDone(true), 3500);
@@ -227,14 +295,14 @@ function App() {
   return (
     <>
       {showLoader && <Loader />}
-      <Navbar 
-        cartCount={cart.length} 
+      <Navbar
+        cartCount={cart.length}
         onCartClick={() => setIsCartOpen(true)}
         filters={filters}
         onFilterChange={updateFilter}
         allNumbers={allNumbers || numbers}
       />
-      <Hero 
+      <Hero
         filters={filters}
         onFilterChange={updateFilter}
         onReset={resetFilters}
@@ -273,7 +341,7 @@ function App() {
                   </select>
                 </div>
               </div>
-              
+
               {numbers.length === 0 ? (
                 <div style={appStyles.centerState}>
                   <Ghost size={48} style={{ color: 'var(--muted)', marginBottom: '16px' }} />
@@ -285,14 +353,19 @@ function App() {
               )}
             </>
           ) : (
-            <HomeShowcase
-              isItemInCart={isItemInCart}
-              onToggleCart={toggleCartItem}
-              onSeeAll={(catId) => {
-                updateFilter('category', catId);
-                window.scrollTo({ top: 500, behavior: 'smooth' });
-              }}
-            />
+            // FIX: allNumbers correctly passed into HomeShowcase
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+              <HomeShowcase
+                allNumbers={allNumbers || numbers}
+                loading={loading}
+                isItemInCart={isItemInCart}
+                onToggleCart={toggleCartItem}
+                onSeeAll={(catId) => {
+                  updateFilter('category', catId);
+                  window.scrollTo({ top: 500, behavior: 'smooth' });
+                }}
+              />
+            </div>
           )}
         </section>
       </main>
@@ -372,15 +445,50 @@ const rowStyles = {
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     color: '#fff', cursor: 'pointer', backdropFilter: 'blur(10px)',
   },
+  // FIX: Scrollable container now holds columns (each column = 2 stacked cards)
   scrollContainer: {
-    display: 'flex', gap: '16px', overflowX: 'auto', padding: '10px 0 20px',
-    scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch', flex: 1,
+    display: 'flex',
+    flexDirection: 'row',
+    gap: '16px',
+    overflowX: 'auto',
+    padding: '10px 0 20px',
+    scrollbarWidth: 'none',
+    msOverflowStyle: 'none',
+    WebkitOverflowScrolling: 'touch',
+    flex: 1,
+  },
+  // Each column stacks 2 cards vertically
+  column: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '16px',
+    flexShrink: 0,
+    alignItems: 'stretch',
+  },
+  // Each card slot keeps cards from stretching
+  cardSlot: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
   },
   moreBadge: {
-    minWidth: '220px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-    background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-    color: 'var(--muted)', fontSize: '13px', fontWeight: 600, cursor: 'pointer',
-    transition: 'all 0.2s', flexShrink: 0, textAlign: 'center', lineHeight: 1.5
+    minWidth: '220px',
+    minHeight: '100px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'var(--bg2)',
+    border: '1px solid var(--border)',
+    borderRadius: 'var(--radius)',
+    color: 'var(--muted)',
+    fontSize: '13px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    flexShrink: 0,
+    textAlign: 'center',
+    lineHeight: 1.5,
+    alignSelf: 'center',
   },
 };
 

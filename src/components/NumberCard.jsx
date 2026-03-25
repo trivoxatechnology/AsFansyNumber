@@ -47,8 +47,12 @@ export default function NumberCard({ item, onToggleCart, inCart, compact = false
   const cat = String(item.number_category || item.category || '6');
   const meta = CATEGORY_META[cat] || CATEGORY_META[6];
   
-  const score = parseInt(item.vip_score) || 0;
-  const stars = Math.round((score / 100) * 5);
+  let stars = 0;
+  if (cat === '1') stars = 5;
+  else if (cat === '2') stars = 4;
+  else if (cat === '3') stars = 3;
+  else if (cat === '4') stars = 2;
+  else if (cat === '5') stars = 1;
 
   const fmtMobile = (num) => {
     const s = String(num);
@@ -74,19 +78,33 @@ export default function NumberCard({ item, onToggleCart, inCart, compact = false
         padding: '16px',
         display: 'flex',
         flexDirection: 'column',
-        minWidth: compact ? '220px' : 'auto',
+        height: '100%',
+        boxSizing: 'border-box',
+        minWidth: compact ? '260px' : '300px',
         flexShrink: compact ? 0 : 1
       }}
     >
       {hasOffer && (
         <div style={{
-          position: 'absolute', top: '12px', right: '12px',
-          background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)',
-          borderRadius: '8px', padding: '4px 10px', fontSize: '11px', 
-          fontFamily: "var(--font-body)", fontWeight: 700, letterSpacing: '0.03em',
-          color: meta.color
+          position: 'absolute', top: '-14px', left: '16px',
+          background: 'linear-gradient(135deg, var(--danger), #ff4d4d)', color: '#fff', 
+          padding: '4px 14px', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '4px',
+          fontSize: '11px', fontFamily: "var(--font-body)", fontWeight: 700,
+          boxShadow: '0 4px 12px rgba(255,50,50,0.3)', zIndex: 10, whiteSpace: 'nowrap'
         }}>
           ★ {disc}% OFF
+        </div>
+      )}
+      {hasOffer && item.offer_end_date && timeRemaining !== 'Expired' && (
+        <div style={{
+          position: 'absolute', top: '-14px', right: '16px',
+          background: 'linear-gradient(135deg, var(--danger), #ff4d4d)', color: '#fff', 
+          padding: '4px 14px', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '6px', 
+          fontSize: '11px', fontFamily: "var(--font-body)", fontWeight: 700,
+          boxShadow: '0 4px 12px rgba(255,50,50,0.3)', zIndex: 10, whiteSpace: 'nowrap'
+        }}>
+          <Clock size={12} />
+          Ends in: <span style={{ fontFamily: "var(--font-number)" }}>{timeRemaining}</span>
         </div>
       )}
 
@@ -96,7 +114,7 @@ export default function NumberCard({ item, onToggleCart, inCart, compact = false
         letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: '10px', 
         color: meta.color
       }}>
-        {meta.emoji} {meta.label} · {item.category_type || item.pattern_type || ''}
+        {meta.emoji} {meta.label} · {item.pattern_name || ''}
       </div>
 
       <div style={{ 
@@ -110,18 +128,21 @@ export default function NumberCard({ item, onToggleCart, inCart, compact = false
         fontSize: '11px', fontFamily: "var(--font-number)", fontWeight: 300,
         letterSpacing: '0.04em', color: 'var(--muted)', marginBottom: '12px' 
       }}>
-        {item.sub_category || item.pattern_name || ''}
+        {item.pattern_name || ''}
       </div>
 
       <div style={{ display: 'flex', gap: '2px', marginBottom: '10px' }}>
-        {[1, 2, 3, 4, 5].map(i => (
-          <Star 
-            key={i} size={11} 
-            fill={i <= stars ? meta.color : 'none'} 
-            stroke={meta.color} 
-            style={{ opacity: i <= stars ? 0.9 : 0.2 }} 
-          />
-        ))}
+        {[1, 2, 3, 4, 5].map(i => {
+          if (stars === 0) return null; // 0 stars = Normal numbers don't show empty stars
+          return (
+            <Star 
+              key={i} size={11} 
+              fill={i <= stars ? meta.color : 'none'} 
+              stroke={meta.color} 
+              style={{ opacity: i <= stars ? 0.9 : 0.2 }} 
+            />
+          );
+        })}
       </div>
 
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', marginBottom: '14px', flexWrap: 'wrap' }}>
@@ -168,13 +189,6 @@ export default function NumberCard({ item, onToggleCart, inCart, compact = false
           Buy Now
         </button>
       </div>
-
-      {hasOffer && item.offer_end_date && timeRemaining !== 'Expired' && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '10px', color: 'var(--danger)', marginTop: '8px', fontFamily: "var(--font-body)", fontWeight: 500 }}>
-          <Clock size={11} />
-          Offer ends: <span style={{ fontFamily: "var(--font-number)", fontWeight: 500 }}>{timeRemaining}</span>
-        </div>
-      )}
     </div>
   );
 }

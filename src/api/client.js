@@ -27,12 +27,34 @@ export async function getNumbers(filters = {}) {
 
 // Fetch all Couple pairs
 export async function getCouples() {
-  return call('/couples');
+  try {
+    const data = await call('/couples');
+    return data;
+  } catch (err) {
+    // Fallback: fetch from wp_fn_couple_numbers directly via generic endpoint if /couples fails
+    try {
+      const fallbackRes = await fetch(BASE.replace('/api.php', '') + '/api.php/wp_fn_couple_numbers');
+      return fallbackRes.ok ? await fallbackRes.json() : [];
+    } catch {
+      return [];
+    }
+  }
 }
 
 // Fetch all Group numbers
 export async function getGroups() {
-  return call('/groups');
+  try {
+    const data = await call('/groups');
+    return data;
+  } catch (err) {
+    // Fallback if custom endpoint fails
+    try {
+      const fallbackRes = await fetch(BASE.replace('/api.php', '') + '/api.php/wp_fn_number_groups');
+      return fallbackRes.ok ? await fallbackRes.json() : [];
+    } catch {
+      return [];
+    }
+  }
 }
 
 // Fetch all Couple and Business groups (LEGACY - keeping for compat if needed elsewhere)
@@ -46,8 +68,8 @@ export async function getCategoryRow(categoryId, limit=12, offset=0) {
 }
 
 // Load by pattern family (nav dropdown click)
-export async function getByPatternFamily(categoryType, limit=24, offset=0) {
-  return getNumbers({ category_type: categoryType, limit, offset });
+export async function getByPatternFamily(patternName, limit=24, offset=0) {
+  return getNumbers({ pattern_name: patternName, limit, offset });
 }
 
 // Load by exact sub-category

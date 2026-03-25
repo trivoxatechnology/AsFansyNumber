@@ -5,51 +5,84 @@ import { getCategories } from '../api/client';
 export default function Navbar({ cartCount, onCartClick, filters, onFilterChange, allNumbers = [] }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [activeDropdown, setActiveDropdown] = useState(null);
+  const [masterPatterns, setMasterPatterns] = useState([]);
   const [dbCategories, setDbCategories] = useState([]);
 
   useEffect(() => {
-    getCategories().then(res => {
-      if (res.success) setDbCategories(res.data || []);
-    }).catch(() => {});
+    import('../api/client').then(m => {
+      Promise.all([
+        m.getCategories().catch(() => ({ success: false, data: [] })),
+        m.getPatterns().catch(() => ({ success: false, data: [] }))
+      ]).then(([catRes, patRes]) => {
+        if (catRes.success) setDbCategories(catRes.data || []);
+        // FIX: The /patterns endpoint returns { success: true, patterns: { catId: [patterns] } }
+        // We convert this object back to a flat array or handle it correctly in useMemo
+        if (patRes.success) {
+           const flat = [];
+           Object.entries(patRes.patterns || {}).forEach(([catId, list]) => {
+             list.forEach(p => flat.push({ ...p, category_id: String(catId) }));
+           });
+           setMasterPatterns(flat);
+        }
+      });
+    });
   }, []);
 
+  const PREDEFINED_PATTERNS = {
+    "1": ["Pure Digit", "Perfect Mirror", "Septa King", "Octa King", "Diamond Symmetry", "Double Sacred", "Hexa Zero Master", "Royal Sequence", "Five Star Couple"],
+    "2": ["Triple Zero Sacred", "Sacred Twin", "Penta Star", "Triple Triple", "Half Mirror", "Lucky 13 Double"],
+    "3": ["Sacred Ending", "Zero Step", "Zero Sacred", "Rising Star", "Falling Star", "Duo Master"],
+    "4": ["Quad Star", "Twin Couple", "Tri Echo"],
+    "5": ["Triple End", "ABAB Rhythm", "AABB Pair", "Thousand Tail", "Fancy Number"],
+    "7": ["Couple Pack", "Matching Pair"],
+    "8": ["Business Group", "Team Bundle"]
+  };
+
   const dbPatterns = useMemo(() => {
-    const mockPatterns = {
-      "1": [{category_type: "Hexa", total: 12}, {category_type: "Palindrome", total: 8}],
-      "2": [{category_type: "Ladder Up", total: 15}, {category_type: "Repeating", total: 20}],
-      "3": [{category_type: "786", total: 10}, {category_type: "Double Pair", total: 25}],
-      "7": [{category_type: "Couple Pack", total: 5}],
-      "8": [{category_type: "Business Group", total: 18}]
-    };
+    const res = {};
 
-    if (!allNumbers || allNumbers.length === 0) return mockPatterns;
-
-    const patterns = {};
-    let hasData = false;
-
-    allNumbers.forEach(n => {
-      const cat = String(n.number_category || n.category);
-      const type = n.pattern_name || n.pattern_type || n.category_type;
-      
-      if (!type || type === 'Regular Number' || type === 'Normal' || type === 'Normal Fancy Numbers') return;
-      
-      hasData = true;
-      if (!patterns[cat]) patterns[cat] = {};
-      patterns[cat][type] = (patterns[cat][type] || 0) + 1;
+    // 1. Initialize with Master Predefined List (ensures 0 counts show up)
+    Object.entries(PREDEFINED_PATTERNS).forEach(([catId, types]) => {
+      res[catId] = {};
+      types.forEach(t => res[catId][t] = 0);
     });
 
-    if (!hasData) return mockPatterns;
+    // 2. Overlay any patterns returned by the master API (if it has more)
+    masterPatterns.forEach(p => {
+      const catId = String(p.category_id || p.category || '6');
+      if (!res[catId]) res[catId] = {};
+      const name = p.pattern_name || p.pattern_type;
+      if (name) res[catId][name] = 0;
+    });
 
-    const res = {};
-    Object.entries(patterns).forEach(([catId, typeMap]) => {
-      res[catId] = Object.entries(typeMap)
-        .map(([category_type, total]) => ({ category_type, total }))
-        .sort((a, b) => b.total - a.total)
-        .slice(0, 10);
+    // 3. Count occurrences in the current allNumbers collection
+    if (allNumbers && allNumbers.length > 0) {
+      allNumbers.forEach(n => {
+        const catId = String(n.number_category || n.category || '6');
+        const type = n.pattern_name;
+        
+        if (!type || ['Normal', 'Regular Number', 'FANCY_NUMBER', 'Fancy Number'].includes(type)) return;
+        
+        if (res[catId]) {
+          if (res[catId].hasOwnProperty(type)) {
+            res[catId][type]++;
+          } else {
+            // Dynamic discovery of types not in master lists
+            res[catId][type] = (res[catId][type] || 0) + 1;
+          }
+        }
+      });
+    }
+
+    const finalRes = {};
+    Object.entries(res).forEach(([catId, typeMap]) => {
+      finalRes[catId] = Object.entries(typeMap)
+        .map(([pattern_name, total]) => ({ pattern_name, total }))
+        .sort((a, b) => b.total - a.total);
     });
     
-    return res;
-  }, [allNumbers]);
+    return finalRes;
+  }, [allNumbers, masterPatterns]);
 
   const staticCategories = [
     { name: 'Diamond', icon: '💎', id: '1', cls: 'diamond' },
@@ -83,40 +116,29 @@ export default function Navbar({ cartCount, onCartClick, filters, onFilterChange
     : staticCategories;
 
   const patternExamples = {
-    'Mirror': '1234 4321',
-    'Mirror Number': '1234 4321',
-    'Palindrome': '1234 5 4321',
-    'Palindrome Number': '1234 5 4321',
-    'Ladder Up': '0123456789',
-    'Ladder Down': '9876543210',
-    'Ladder Series': '0123456789',
-    'Descending Ladder': '9876543210',
-    'Repeating': '999999',
-    'Repeating Fancy': 'XXXXXX',
-    'Double Pair': 'XX YY ZZ',
-    'Double Pair Fancy': 'AABB CC',
-    'Triple': 'AAA BBB',
-    'Triple Digit': 'XXX YYY',
-    'Sequential': '123 456',
-    'Sequential Number': '123 456',
-    '786 Holy': '**786**',
-    '786': '**786**',
-    'Hexa': 'X×6 digits',
-    'Hexa Number': 'X×6 digits',
-    'Penta': 'X×5 digits',
-    'Penta Number': 'X×5 digits',
-    'Tetra': 'X×4 digits',
-    'Tetra Number': 'X×4 digits',
-    'Couple Pack': '2 matching SIMs',
-    'Business Group': '3+ grouped SIMs',
-    'Premium Bundle': 'Group package',
+    'Diamond': '99999 99999 (Pure), 12345 54321 (Mirror)',
+    'Platinum': '99999 12345 (Penta), 000 786 000 (Sacred)',
+    'Gold': '0123456789 (Ladder), 1212121212 (Sequence)',
+    'Silver': '9999 123456 (Tetra), 1313 1313 (Lucky)',
+    'Bronze': '999 1234567 (Triple), Sum=9 (Numerology)',
+    'Pure Digit': '99999 99999',
+    'Perfect Mirror': '12345 54321',
+    'Septa King': '0000000 123',
+    'Sacred Twin': '786 XXX 786',
+    'Triple Zero Sacred': '000 786 XXXX',
+    'Lucky 13 Double': '1313 XX 1313',
+    'Zero Step': '9 00 9 00 9 00',
+    'Tri Echo': '123 123 XXXX',
+    'ABAB Rhythm': '45 45 XX 4545',
+    'AABB Pair': '44 55 XX 4455',
+    'Thousand Tail': 'XXXXXX 1000',
     'Normal': '9845X XXXXX'
   };
 
   const handlePatternClick = (catId, pattern) => {
     if (onFilterChange) {
       onFilterChange('category', catId);
-      onFilterChange('pattern_type', pattern);
+      onFilterChange('pattern_name', pattern);
       window.scrollTo({ top: 500, behavior: 'smooth' });
     }
   };
@@ -124,7 +146,7 @@ export default function Navbar({ cartCount, onCartClick, filters, onFilterChange
   const handleCategoryClick = (catId) => {
     if (onFilterChange) {
       onFilterChange('category', catId);
-      onFilterChange('pattern_type', '');
+      onFilterChange('pattern_name', '');
       window.scrollTo({ top: 500, behavior: 'smooth' });
     }
   };
@@ -155,7 +177,7 @@ export default function Navbar({ cartCount, onCartClick, filters, onFilterChange
           </div>
 
           <div className="desktop-nav">
-            {categories.filter(c => c.id !== '6').map(cat => {
+            {categories.map(cat => {
               const patterns = dbPatterns[cat.id] || [];
               const isHovered = activeDropdown === cat.id;
 
@@ -188,15 +210,15 @@ export default function Navbar({ cartCount, onCartClick, filters, onFilterChange
                         <button 
                           key={idx} 
                           style={styles.dropdownItem}
-                          onClick={() => handlePatternClick(cat.id, p.category_type)}
+                          onClick={() => handlePatternClick(cat.id, p.pattern_name)}
                         >
                           <div style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <span style={{ fontWeight: 600 }}>{p.category_type}</span>
+                              <span style={{ fontWeight: 600 }}>{p.pattern_name}</span>
                               <span style={{ fontSize: '10px', opacity: 0.5 }}>{p.total}</span>
                             </div>
                             <span style={{ fontSize: '11px', opacity: 0.4, marginTop: '2px' }}>
-                              Ex: {patternExamples[p.category_type] || 'XXXX'}
+                              Ex: {patternExamples[p.pattern_name] || 'XXXX'}
                             </span>
                           </div>
                         </button>
@@ -242,15 +264,15 @@ export default function Navbar({ cartCount, onCartClick, filters, onFilterChange
                     <button 
                       key={idx}
                       style={{...styles.mobileLink, padding: '12px 0', fontSize: '13px', width: '100%', justifyContent: 'flex-start', background: 'none', border: 'none', borderBottom: '1px solid rgba(255,255,255,0.03)'}}
-                      onClick={() => { handlePatternClick(cat.id, p.category_type); setIsMobileMenuOpen(false); }}
+                      onClick={() => { handlePatternClick(cat.id, p.pattern_name); setIsMobileMenuOpen(false); }}
                     >
                       <div style={{ display: 'flex', flexDirection: 'column', width: '100%', textAlign: 'left' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ opacity: 0.9 }}>{p.category_type}</span>
+                          <span style={{ opacity: 0.9 }}>{p.pattern_name}</span>
                           <span style={{ fontSize: '10px', opacity: 0.4 }}>{p.total}</span>
                         </div>
                         <span style={{ fontSize: '11px', opacity: 0.3, marginTop: '2px' }}>
-                          Ex: {patternExamples[p.category_type] || 'XXXX'}
+                          Ex: {patternExamples[p.pattern_name] || 'XXXX'}
                         </span>
                       </div>
                     </button>

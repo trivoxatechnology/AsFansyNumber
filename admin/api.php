@@ -71,7 +71,9 @@ if (isset($_GET['setup']) && $_GET['setup'] === '1') {
         "wp_fn_numbers" => [
             "ALTER TABLE `wp_fn_numbers` ADD COLUMN `group_position` INT(11) DEFAULT NULL AFTER `bundle_type`",
             "ALTER TABLE `wp_fn_numbers` ADD COLUMN `created_at` datetime DEFAULT CURRENT_TIMESTAMP",
-            "ALTER TABLE `wp_fn_numbers` ADD COLUMN `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
+            "ALTER TABLE `wp_fn_numbers` ADD COLUMN `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
+            "UPDATE `wp_fn_numbers` SET `pattern_name` = COALESCE(`pattern_name`, `category_type`, `pattern_type`, `pattern_code`) WHERE `pattern_name` IS NULL OR `pattern_name` = ''",
+            "ALTER TABLE `wp_fn_numbers` DROP COLUMN IF EXISTS `sub_category`, DROP COLUMN IF EXISTS `number_type`, DROP COLUMN IF EXISTS `category_type`, DROP COLUMN IF EXISTS `pattern_type`, DROP COLUMN IF EXISTS `pattern_code`, DROP COLUMN IF EXISTS `repeat_count`, DROP COLUMN IF EXISTS `auto_detected`, DROP COLUMN IF EXISTS `upload_batch_id`, DROP COLUMN IF EXISTS `offer_start_date`, DROP COLUMN IF EXISTS `platform_commission`, DROP COLUMN IF EXISTS `remarks`, DROP COLUMN IF EXISTS `created_at`, DROP COLUMN IF EXISTS `batch_file_name`, DROP COLUMN IF EXISTS `group_position`, DROP COLUMN IF EXISTS `pattern_category`, DROP COLUMN IF EXISTS `all_patterns`, DROP COLUMN IF EXISTS `vip_score`"
         ],
         "wp_fn_couple_numbers" => [
             "ALTER TABLE `wp_fn_couple_numbers` ADD COLUMN `created_at` datetime DEFAULT CURRENT_TIMESTAMP",
@@ -237,89 +239,124 @@ try { $pdo->exec("ALTER TABLE `wp_fn_upload_batches` ADD COLUMN `completed_at` d
 try { $pdo->exec("ALTER TABLE `wp_fn_upload_flags` ADD COLUMN `status` varchar(30) DEFAULT 'pending'"); } catch(Exception $e){}
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// AUTO-GENERATION ENGINE — Pattern detection, VIP scoring, category from pattern
+// AUTO-GENERATION ENGINE — Unified Pattern Detection (30+ Rules)
+// Categories: Diamond(1), Platinum(2), Gold(3), Silver(4), Bronze(5), Normal(6)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function get_category_from_pattern(string $pt): int {
-    switch ($pt) {
-        case 'Mirror':
-        case 'Palindrome':
-            return 1;
-        case 'Ladder Up':
-        case 'Ladder Down':
-        case 'Repeating':
-            return 2;
-        case 'Double Pair':
-        case 'Triple':
-            return 3;
-        case 'Sequential':
-            return 4;
-        case 'Special':
-            return 5;
-        default:
-            return 6;
-    }
-}
-
-function get_pattern_display_name(string $pt): string {
-    switch ($pt) {
-        case 'Mirror':      return 'Mirror Number';
-        case 'Palindrome':  return 'Palindrome Number';
-        case 'Ladder Up':   return 'Ladder Series';
-        case 'Ladder Down': return 'Descending Ladder';
-        case 'Repeating':   return 'Repeating Fancy';
-        case 'Double Pair': return 'Double Pair Fancy';
-        case 'Triple':      return 'Triple Digit';
-        case 'Sequential':  return 'Sequential Number';
-        default:           return 'Regular Number';
-    }
-}
-
-function detect_pattern_type(string $num): string {
+/**
+ * Detect pattern and return ['pattern_name' => string, 'category_id' => int]
+ * Rules ordered by priority — first match wins.
+ */
+function detect_full_pattern(string $num): array {
+    if (strlen($num) !== 10) return ['pattern_name' => 'Regular Number', 'category_id' => 6];
     $d = str_split($num);
-    $n = strlen($num);
-    $h = (int)floor($n / 2);
-    $fh = array_slice($d, 0, $h);
-    $sh = array_reverse(array_slice($d, $n - $h));
-    if ($fh === $sh) return 'Mirror';
-    if ($num === strrev($num)) return 'Palindrome';
-    $up = $dn = true;
-    for ($i = 1; $i < $n; $i++) {
-        if ((int)$d[$i] !== (int)$d[$i-1] + 1) $up = false;
-        if ((int)$d[$i] !== (int)$d[$i-1] - 1) $dn = false;
-    }
-    if ($up) return 'Ladder Up';
-    if ($dn) return 'Ladder Down';
-    if (preg_match('/(.)\1{2,}/', $num))  return 'Repeating';
-    if (preg_match('/(.)\1(.)\2/', $num)) return 'Double Pair';
-    if (preg_match('/(.)\1\1/', $num))    return 'Triple';
-    $u = $dd = 0;
-    for ($i = 1; $i < $n; $i++) {
-        $u  = ((int)$d[$i] === (int)$d[$i-1] + 1) ? $u + 1  : 0;
-        $dd = ((int)$d[$i] === (int)$d[$i-1] - 1) ? $dd + 1 : 0;
-        if ($u >= 3 || $dd >= 3) return 'Sequential';
-    }
-    return 'Normal';
-}
 
-function calculate_vip_score(string $pt, int $ds, int $rc, string $sx): int {
-    $s = 10;
-    $s += match($pt) {
-        'Mirror','Palindrome'         => 35,
-        'Ladder Up','Ladder Down',
-        'Repeating'                   => 25,
-        'Double Pair','Triple'        => 15,
-        'Sequential'                  => 10,
-        default                       => 0,
-    };
-    if ($rc >= 4)               $s += 10;
-    if ($ds >= 1 && $ds <= 9)   $s += 5;
-    if ($ds === 7 || $ds === 9) $s += 5;
-    if (preg_match('/^(.)\1+$/', $sx)) $s += 5;
-    $seqs = ['0123','1234','2345','3456','4567','5678','6789',
-             '9876','8765','7654','6543','5432','4321','3210'];
-    if (in_array($sx, $seqs)) $s += 5;
-    return min($s, 100);
+    // ── DIAMOND (Category 1) ─────────────────────────────────────────────────
+    if (preg_match('/(.)\\1{7}/', $num)) return ['pattern_name' => '8 Digits Same', 'category_id' => 1];
+    if (preg_match('/(.)\\1{6}/', $num)) return ['pattern_name' => '7 Digits Same', 'category_id' => 1];
+    if (preg_match('/(.)\\1{5}/', $num)) {
+        if (strpos($num, '000000') !== false) return ['pattern_name' => 'Hexa Zeros', 'category_id' => 1];
+        return ['pattern_name' => 'Hexa Number', 'category_id' => 1];
+    }
+    if (substr($num, 0, 5) === '00000') return ['pattern_name' => '00000 + ' . substr($num, 5), 'category_id' => 1];
+    if ($num === '0000000786' || substr($num, -6) === '000786') return ['pattern_name' => '000786 Sacred', 'category_id' => 1];
+    $first5 = substr($num, 0, 5); $last5r = strrev(substr($num, 5));
+    if ($first5 === $last5r) return ['pattern_name' => '10 Digits Symmetry', 'category_id' => 1];
+    $mid8 = substr($num, 1, 8);
+    if (substr($mid8, 0, 4) === strrev(substr($mid8, 4))) return ['pattern_name' => '8 Digits Symmetry', 'category_id' => 1];
+    if ($d[0]===$d[1] && $d[2]===$d[3] && $d[4]===$d[5] && $d[6]===$d[7] && $d[8]===$d[9])
+        return ['pattern_name' => 'Full 5-Couple Sequence', 'category_id' => 1];
+    $p1 = substr($num,0,2); $p2 = substr($num,2,2);
+    if (substr($num,4,2)===$p1 && substr($num,6,2)===$p2 && substr($num,8,2)===$p1)
+        return ['pattern_name' => 'AB-CD-AB-CD-AB', 'category_id' => 1];
+
+    // ── PLATINUM (Category 2) ────────────────────────────────────────────────
+    if (preg_match('/(.)\\1{4}/', $num)) {
+        if (preg_match('/(.)\\1{4}$/', $num)) return ['pattern_name' => 'Penta Last', 'category_id' => 2];
+        return ['pattern_name' => 'Penta Number', 'category_id' => 2];
+    }
+    if (strpos($num, '786786') !== false) return ['pattern_name' => 'Double 786', 'category_id' => 2];
+    $f786 = strpos($num, '786');
+    if ($f786 !== false && strpos($num, '786', $f786+3) !== false)
+        return ['pattern_name' => '786 Twin', 'category_id' => 2];
+    $isUp = $isDn = true;
+    for ($i=1; $i<10; $i++) {
+        if ((int)$d[$i] !== ((int)$d[$i-1]+1)%10) $isUp = false;
+        if ((int)$d[$i] !== ((int)$d[$i-1]-1+10)%10) $isDn = false;
+    }
+    if ($isUp) return ['pattern_name' => 'Full Ascending Ladder', 'category_id' => 2];
+    if ($isDn) return ['pattern_name' => 'Full Descending Ladder', 'category_id' => 2];
+    if (substr($num,0,4) === substr($num,4,4)) return ['pattern_name' => 'Start ABCD-ABCD', 'category_id' => 2];
+    if (substr($num,2,4) === substr($num,6,4)) return ['pattern_name' => 'Last ABCD-ABCD', 'category_id' => 2];
+    if (substr($num,1,4) === substr($num,5,4)) return ['pattern_name' => 'Middle ABCD-ABCD', 'category_id' => 2];
+    $l4d = substr($num, -4);
+    if ($l4d[0]===$l4d[3] && $l4d[1]===$l4d[2]) return ['pattern_name' => 'Semi Mirror', 'category_id' => 2];
+    if (substr($num,0,3) === substr($num,3,3)) return ['pattern_name' => 'Start XYZ-XYZ', 'category_id' => 2];
+    if (substr($num,4,3) === substr($num,7,3)) return ['pattern_name' => 'Last XYZ-XYZ', 'category_id' => 2];
+    if (substr($num,2,3) === substr($num,5,3)) return ['pattern_name' => 'Middle XYZ-XYZ', 'category_id' => 2];
+    $e6 = substr($num, -6);
+    if (substr($e6,0,2) === substr($e6,2,2) && substr($e6,2,2) === substr($e6,4,2))
+        return ['pattern_name' => 'Triple Pair Run', 'category_id' => 2];
+    if (substr($num,0,2) === substr($num,2,2) && substr($num,2,2) === substr($num,4,2))
+        return ['pattern_name' => 'Triple Pair Run', 'category_id' => 2];
+    $l8 = substr($num, -8); $xyp = substr($l8, 0, 2);
+    if (strlen($l8)===8 && substr($l8,2,2)===$xyp && substr($l8,4,2)===$xyp && substr($l8,6,2)===$xyp)
+        return ['pattern_name' => 'Quadruple Couple', 'category_id' => 2];
+
+    // ── GOLD (Category 3) ────────────────────────────────────────────────────
+    if (preg_match('/(.)\\1{3}/', $num)) {
+        if (preg_match('/(.)\\1{3}$/', $num)) return ['pattern_name' => 'Tetra Last', 'category_id' => 3];
+        if (preg_match('/^(.)\\1{3}/', $num)) return ['pattern_name' => 'Start Tetra', 'category_id' => 3];
+        return ['pattern_name' => 'Tetra Number', 'category_id' => 3];
+    }
+    if (substr($num,-5) === '00786') return ['pattern_name' => '00786 Sacred', 'category_id' => 3];
+    if (substr($num,-4) === '0786')  return ['pattern_name' => '0786 Sacred', 'category_id' => 3];
+    if (substr($num,-3) === '786')   return ['pattern_name' => '786 Ending', 'category_id' => 3];
+    if (substr($num,0,3) === '786')  return ['pattern_name' => '786 Starting', 'category_id' => 3];
+    if (strpos($num,'786') !== false) return ['pattern_name' => '786 Middle', 'category_id' => 3];
+    $e6g = substr($num, -6);
+    if ($e6g[0]===$e6g[1] && $e6g[2]===$e6g[3] && $e6g[4]===$e6g[5] && $e6g[0]!==$e6g[2])
+        return ['pattern_name' => 'Triple Doubling', 'category_id' => 3];
+    for ($i=0; $i<=2; $i++) {
+        $blk = substr($num, $i, 4); $nxt = substr($num, $i+4, 4);
+        if (strlen($nxt)===4 && $blk === strrev($nxt))
+            return ['pattern_name' => 'Ulta-Pulta', 'category_id' => 3];
+    }
+    if (count(array_unique($d)) <= 2) return ['pattern_name' => 'Duo Master', 'category_id' => 3];
+
+    // ── SILVER (Category 4) ──────────────────────────────────────────────────
+    if (preg_match('/(.)\\1{2}/', $num)) {
+        if (preg_match('/(.)\\1{2}$/', $num)) {
+            if (substr($num,-3)==='000') return ['pattern_name' => 'Triple Zero (Last)', 'category_id' => 4];
+            return ['pattern_name' => 'Triple Last', 'category_id' => 4];
+        }
+        if (strpos($num,'000') !== false) return ['pattern_name' => 'Triple Zero (Mid)', 'category_id' => 4];
+    }
+    if (substr($num,-7)==='0000013') return ['pattern_name' => '5 Zeros + 13', 'category_id' => 4];
+    if (strpos($num,'131313') !== false) return ['pattern_name' => '13 Triple', 'category_id' => 4];
+    if (substr($num,-4)==='1313') return ['pattern_name' => '13 Double', 'category_id' => 4];
+    $maxA=1;$maxD=1;$a=1;$dd=1;
+    for ($i=1;$i<10;$i++) {
+        if ((int)$d[$i]===(int)$d[$i-1]+1){$a++;$maxA=max($maxA,$a);}else $a=1;
+        if ((int)$d[$i]===(int)$d[$i-1]-1){$dd++;$maxD=max($maxD,$dd);}else $dd=1;
+    }
+    if ($maxA>=4) return ['pattern_name' => $maxA.'-Digit Sequential', 'category_id' => 4];
+    if ($maxD>=4) return ['pattern_name' => $maxD.'-Digit Descending', 'category_id' => 4];
+    if ($d[1]===$d[3]&&$d[3]===$d[5]&&$d[5]===$d[7]&&$d[7]===$d[9])
+        return ['pattern_name' => 'Alternating Digit', 'category_id' => 4];
+    if ($d[0]===$d[2]&&$d[2]===$d[4]&&$d[4]===$d[6]&&$d[6]===$d[8])
+        return ['pattern_name' => 'Alternating Digit Even', 'category_id' => 4];
+    if (preg_match('/(.)\\1{2}/', $num)) return ['pattern_name' => 'Triple Number', 'category_id' => 4];
+
+    // ── BRONZE (Category 5) ──────────────────────────────────────────────────
+    $l4b = substr($num, -4);
+    if (strlen($l4b)===4 && substr($l4b,0,2)===substr($l4b,2,2))
+        return ['pattern_name' => 'Double Couple', 'category_id' => 5];
+    if (substr($num,-3)==='108') return ['pattern_name' => '108 Devotional', 'category_id' => 5];
+    if (substr($num,-4)==='1008') return ['pattern_name' => '1008 Devotional', 'category_id' => 5];
+
+    // ── NORMAL (Category 6) ──────────────────────────────────────────────────
+    return ['pattern_name' => 'Regular Number', 'category_id' => 6];
 }
 
 function auto_generate_fields(array $row): array {
@@ -331,29 +368,26 @@ function auto_generate_fields(array $row): array {
         $gen['prefix'] = substr($num, 0, 4);
     if (empty($row['suffix']))
         $gen['suffix'] = substr($num, -4);
-    if (!isset($row['digit_sum']) || $row['digit_sum'] === '')
-        $gen['digit_sum'] = array_sum(array_map('intval', $d));
-    if (!isset($row['repeat_count']) || $row['repeat_count'] === '') {
-        $freq = array_count_values($d);
-        $gen['repeat_count'] = max($freq);
+    if (!isset($row['digit_sum']) || $row['digit_sum'] === '') {
+        $ds = array_sum(array_map('intval', $d));
+        $gen['digit_sum'] = $ds;
     }
-    if (empty($row['pattern_type']))
-        $gen['pattern_type'] = detect_pattern_type($num);
 
-    $pt = $gen['pattern_type'] ?? ($row['pattern_type'] ?? 'Normal');
-
-    if (empty($row['pattern_name']))
-        $gen['pattern_name'] = get_pattern_display_name($pt);
-    if (!isset($row['vip_score']) || $row['vip_score'] === '') {
-        $ds = $gen['digit_sum']    ?? ((int)($row['digit_sum'] ?? 0));
-        $rc = $gen['repeat_count'] ?? ((int)($row['repeat_count'] ?? 0));
-        $sx = $gen['suffix']       ?? ($row['suffix'] ?? '');
-        $gen['vip_score'] = (string)calculate_vip_score($pt, $ds, $rc, $sx);
+    // Pattern & Category Detection — full 30+ rule engine
+    $detection = detect_full_pattern($num);
+    if (empty($row['pattern_name'])) {
+        $gen['pattern_name'] = $detection['pattern_name'];
     }
-    if (empty($row['number_category']))
-        $gen['number_category'] = get_category_from_pattern($pt);
+    if (empty($row['number_category'])) {
+        $gen['number_category'] = $detection['category_id'];
+    }
 
-    $gen['auto_detected'] = !empty($gen) ? 1 : 0;
+    // Numerology Root
+    if (!isset($row['numerology_root']) || $row['numerology_root'] === '') {
+        $ds = $gen['digit_sum'] ?? ((int)($row['digit_sum'] ?? 0));
+        $gen['numerology_root'] = $ds % 9 ?: 9;
+    }
+
     return array_merge($row, $gen);
 }
 
@@ -467,22 +501,6 @@ function handle_stats($pdo, $table) {
     $groupBy = $_GET['group_by'] ?? null;
 
     try {
-        if ($groupBy === 'dealer_id') {
-            $stmt = $pdo->query("
-                SELECT
-                    d.dealer_name, n.dealer_id,
-                    COUNT(*) as total,
-                    SUM(CASE WHEN n.number_status = 'available' THEN 1 ELSE 0 END) as available,
-                    SUM(CASE WHEN n.number_status = 'sold' THEN 1 ELSE 0 END) as sold
-                FROM `wp_fn_numbers` n
-                LEFT JOIN `wp_fn_dealers` d ON n.dealer_id = d.dealer_id
-                GROUP BY n.dealer_id
-                ORDER BY total DESC
-            ");
-            echo json_encode(["success" => true, "data" => $stmt->fetchAll()]);
-            return;
-        }
-
         $thisMonth = date('Y-m-01');
         $stmt = $pdo->query("
             SELECT
@@ -490,6 +508,7 @@ function handle_stats($pdo, $table) {
                 SUM(CASE WHEN `number_status` = 'available' THEN 1 ELSE 0 END) as available,
                 SUM(CASE WHEN `number_status` = 'sold' THEN 1 ELSE 0 END) as sold,
                 SUM(CASE WHEN `offer_price` > 0 AND `number_status` = 'available' THEN 1 ELSE 0 END) as on_offer,
+                SUM(CASE WHEN `base_price` >= 50000 THEN 1 ELSE 0 END) as premium,
                 SUM(CASE WHEN number_category=1 THEN 1 ELSE 0 END) as diamond,
                 SUM(CASE WHEN number_category=2 THEN 1 ELSE 0 END) as platinum,
                 SUM(CASE WHEN number_category=3 THEN 1 ELSE 0 END) as gold,
@@ -515,7 +534,7 @@ function handle_pattern_stats($pdo, $table) {
     try {
         $stmt = $pdo->query("
             SELECT
-                n.pattern_type,
+                n.pattern_name,
                 n.number_category,
                 CASE n.number_category
                     WHEN 1 THEN 'Diamond'
@@ -533,8 +552,8 @@ function handle_pattern_stats($pdo, $table) {
                     THEN 1 ELSE 0 END) as sold,
                 ROUND(AVG(n.base_price),2) as avg_price
             FROM `$table` n
-            GROUP BY n.pattern_type, n.number_category
-            ORDER BY n.number_category ASC, n.pattern_type ASC
+            GROUP BY n.pattern_name, n.number_category
+            ORDER BY n.number_category ASC, n.pattern_name ASC
         ");
         echo json_encode(["success" => true, "patterns" => $stmt->fetchAll()]);
     } catch (Exception $e) {
@@ -565,15 +584,8 @@ function handle_couples_get($pdo) {
                          cn.couple_offer_price, cn.couple_status,
                          n1.mobile_number AS number_1,
                          n1.base_price    AS price_1,
-                         n1.category_type AS category_1,
-                         n1.number_id     AS number_id_1,
-                         n2.mobile_number AS number_2,
-                         n2.base_price    AS price_2,
-                         n2.category_type AS category_2,
-                         n2.number_id     AS number_id_2
-                  FROM wp_fn_couple_numbers cn
-                  JOIN wp_fn_numbers n1 ON cn.number_id_1 = n1.number_id
-                  JOIN wp_fn_numbers n2 ON cn.number_id_2 = n2.number_id
+                   JOIN wp_fn_numbers n1 ON cn.number_id_1 = n1.number_id
+                   JOIN wp_fn_numbers n2 ON cn.number_id_2 = n2.number_id
                   WHERE cn.visibility_status = 1
                     AND cn.couple_status = 'available'
                   ORDER BY cn.couple_id DESC";
@@ -590,7 +602,7 @@ function handle_groups_get($pdo) {
         $query = "SELECT g.group_id, g.group_name, g.group_type,
                          g.group_price, g.group_offer_price, g.group_status,
                          n.number_id, n.mobile_number, n.base_price,
-                         n.offer_price, n.category_type, n.number_status,
+                         n.offer_price, n.number_status,
                          m.sort_order
                   FROM wp_fn_number_groups g
                   JOIN wp_fn_number_group_members m ON m.group_id = g.group_id
@@ -929,6 +941,74 @@ function handle_upload_process($pdo) {
         }
     }
 
+    // ── Auto-group orphan rows by number_category when no explicit IDs ─────
+    // category=7 → couples (pair every 2 consecutive), category=8 → groups (consecutive runs)
+    $autoCoupleSeq = 1;
+    $autoGroupSeq  = 1;
+    $orphanCoupleQueue = [];
+    $currentGroupRun   = [];
+    $remainingSolo     = [];
+
+    foreach ($soloRows as $row) {
+        $cat = trim($row['number_category'] ?? ($row['category'] ?? ''));
+        if ($cat === '7') {
+            // Flush any open group run first
+            if (!empty($currentGroupRun)) {
+                if (count($currentGroupRun) >= 2) {
+                    $groupBuckets['auto_g' . $autoGroupSeq++] = $currentGroupRun;
+                } else {
+                    foreach ($currentGroupRun as $gr) $remainingSolo[] = $gr;
+                }
+                $currentGroupRun = [];
+            }
+            // Queue for couple pairing
+            $orphanCoupleQueue[] = $row;
+            if (count($orphanCoupleQueue) === 2) {
+                $coupleBuckets['auto_c' . $autoCoupleSeq++] = $orphanCoupleQueue;
+                $orphanCoupleQueue = [];
+            }
+        } elseif ($cat === '8') {
+            // Flush any pending couple orphan (odd leftover) back to solo
+            if (!empty($orphanCoupleQueue)) {
+                foreach ($orphanCoupleQueue as $cr) $remainingSolo[] = $cr;
+                $orphanCoupleQueue = [];
+            }
+            // Accumulate into current group run (max 5)
+            $currentGroupRun[] = $row;
+            if (count($currentGroupRun) === 5) {
+                $groupBuckets['auto_g' . $autoGroupSeq++] = $currentGroupRun;
+                $currentGroupRun = [];
+            }
+        } else {
+            // Non-couple/group row — flush any open queues
+            if (!empty($orphanCoupleQueue)) {
+                foreach ($orphanCoupleQueue as $cr) $remainingSolo[] = $cr;
+                $orphanCoupleQueue = [];
+            }
+            if (!empty($currentGroupRun)) {
+                if (count($currentGroupRun) >= 2) {
+                    $groupBuckets['auto_g' . $autoGroupSeq++] = $currentGroupRun;
+                } else {
+                    foreach ($currentGroupRun as $gr) $remainingSolo[] = $gr;
+                }
+                $currentGroupRun = [];
+            }
+            $remainingSolo[] = $row;
+        }
+    }
+    // Flush remaining queues
+    if (!empty($orphanCoupleQueue)) {
+        foreach ($orphanCoupleQueue as $cr) $remainingSolo[] = $cr;
+    }
+    if (!empty($currentGroupRun)) {
+        if (count($currentGroupRun) >= 2) {
+            $groupBuckets['auto_g' . $autoGroupSeq++] = $currentGroupRun;
+        } else {
+            foreach ($currentGroupRun as $gr) $remainingSolo[] = $gr;
+        }
+    }
+    $soloRows = $remainingSolo;
+
     // ═════════════════════════════════════════════════════════════════════════
     // STEP D — Validate bucket sizes
     // ═════════════════════════════════════════════════════════════════════════
@@ -1026,23 +1106,13 @@ function handle_upload_process($pdo) {
     }
     $finalCouples = [];
     foreach ($cleanCouples as $cid => $rows) {
-        $hasDup = false;
-        foreach ($rows as $r) { if (in_array($r['mobile_number'], $dbDups)) { $hasDup = true; break; } }
-        if ($hasDup) {
-            foreach ($rows as $r) { $r['_flag_reason'] = 'Couple broken by existing DB number'; $flaggedRows[] = $r; }
-        } else {
-            $finalCouples[$cid] = $rows;
-        }
+        // Allow couples to form even if numbers exist in DB (they will be upserted)
+        $finalCouples[$cid] = $rows;
     }
     $finalGroups = [];
     foreach ($cleanGroups as $gid => $rows) {
-        $hasDup = false;
-        foreach ($rows as $r) { if (in_array($r['mobile_number'], $dbDups)) { $hasDup = true; break; } }
-        if ($hasDup) {
-            foreach ($rows as $r) { $r['_flag_reason'] = 'Group broken by existing DB number'; $flaggedRows[] = $r; }
-        } else {
-            $finalGroups[$gid] = $rows;
-        }
+        // Allow groups to form even if numbers exist in DB (they will be upserted)
+        $finalGroups[$gid] = $rows;
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -1066,7 +1136,6 @@ function handle_upload_process($pdo) {
         // G1: Insert solo numbers
         foreach (array_chunk($finalSolo, 500) as $chunk) {
             $chunk = array_map(function($r) use ($batchId, $dealerId) {
-                $r['upload_batch_id'] = $batchId;
                 $r['bundle_type'] = 'none';
                 if (empty($r['dealer_id'])) $r['dealer_id'] = $dealerId;
                 return auto_generate_fields(up_map_row($r));
@@ -1087,16 +1156,18 @@ function handle_upload_process($pdo) {
         $pdo->exec("INSERT IGNORE INTO `wp_fn_number_groups` (`group_id`, `group_name`, `is_couple`, `min_numbers`, `max_numbers`, `group_status`, `visibility_status`) VALUES (0, 'Unassigned', 0, 0, 0, 'available', 1)");
 
         foreach ($finalCouples as $cid => $rows) {
-            // STEP 1 & 2: Insert each number into wp_fn_numbers (bundle_type='couple', couple_id=NULL)
             $numIds = [];
             foreach ($rows as $pos => $r) {
-                $r['upload_batch_id'] = $batchId;
+                // STEP 1 & 2: Insert each number into wp_fn_numbers (bundle_type='couple', couple_id=NULL)
                 $r['bundle_type']     = 'couple';
                 if (empty($r['dealer_id'])) $r['dealer_id'] = $dealerId;
                 $mapped = auto_generate_fields(up_map_row($r));
                 $mapped['couple_id']  = null; // Explicitly NULL
-                $nid = up_insert_single($pdo, $targetTable, $mapped, $dbCols);
-                if ($nid) $numIds[] = $nid;
+                $nid = up_upsert_single($pdo, $targetTable, $mapped, $dbCols);
+                if (!$nid) {
+                    throw new Exception("Failed to insert number " . ($pos+1) . " of couple $cid");
+                }
+                $numIds[] = $nid;
             }
 
             // STEP 3: Insert into wp_fn_couple_numbers with captured IDs and summed prices
@@ -1111,6 +1182,9 @@ function handle_upload_process($pdo) {
                 $stmtCouple = $pdo->prepare("INSERT INTO wp_fn_couple_numbers (number_id_1, number_id_2, couple_price, couple_offer_price, couple_label, couple_status, visibility_status, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'available', 1, ?, NOW(), NOW())");
                 $stmtCouple->execute([$numIds[0], $numIds[1], $couplePrice, $coupleOfferPrice, 'Couple '.$cid, $_POST['uploaded_by'] ?? 'admin']);
                 $dbCoupleId = (int)$pdo->lastInsertId();
+                if (!$dbCoupleId) {
+                    throw new Exception("Failed to insert couple record $cid");
+                }
 
                 // STEP 4: Back-update wp_fn_numbers with the newly generated couple_id
                 $pdo->prepare("UPDATE `$targetTable` SET couple_id = ? WHERE number_id IN (?, ?)")
@@ -1134,23 +1208,27 @@ function handle_upload_process($pdo) {
             $stmtGroup = $pdo->prepare("INSERT INTO wp_fn_number_groups (group_name, group_type, is_couple, group_price, group_offer_price, group_status, visibility_status, min_numbers, max_numbers, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'available', 1, 1, ?, ?, NOW(), NOW())");
             $stmtGroup->execute(['Group '.$gid, $gtype, $cnt===2 ? 1 : 0, $gPrice, $gOffer, $cnt, $_POST['uploaded_by'] ?? 'admin']);
             $dbGroupId = (int)$pdo->lastInsertId();
+            if (!$dbGroupId) {
+                throw new Exception("Failed to insert group $gid");
+            }
 
             // STEP 2: For each row in the group, INSERT into wp_fn_numbers
             $numIds = [];
             foreach ($rows as $pos => $r) {
-                $r['upload_batch_id'] = $batchId;
                 $r['bundle_type']     = 'group';
-                $r['group_position']  = $pos + 1;
                 if (empty($r['dealer_id'])) $r['dealer_id'] = $dealerId;
                 $mapped = auto_generate_fields(up_map_row($r));
                 $mapped['group_id']   = $dbGroupId; // Use DB-generated ID
-                $nid = up_insert_single($pdo, $targetTable, $mapped, $dbCols);
-                if ($nid) {
-                    $numIds[] = [
-                        'number_id'  => $nid,
-                        'sort_order' => $pos + 1
-                    ];
+                $nid = up_upsert_single($pdo, $targetTable, $mapped, $dbCols);
+                if (!$nid) {
+                    $pdo->prepare("INSERT INTO wp_fn_upload_flags (batch_id, flag_type, ref_id, reason, error_type, status, created_at) VALUES (?, 'error', ?, ?, 'insert_failed', 'pending', NOW())")
+                        ->execute([$batchId, $r['mobile_number'] ?? 'N/A', "Failed to insert member position ".($pos+1)." in group $gid"]);
+                    continue;
                 }
+                $numIds[] = [
+                    'number_id'  => $nid,
+                    'sort_order' => $pos + 1
+                ];
             }
 
             // STEP 3: For each number inserted in step 2, INSERT into wp_fn_number_group_members
@@ -1201,9 +1279,16 @@ function handle_upload_process($pdo) {
         ]);
     } catch (Exception $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
+        $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
         $pdo->prepare("UPDATE wp_fn_upload_batches SET status = 'failed', completed_at = NOW() WHERE batch_id = ?")->execute([$batchId]);
         http_response_code(500);
-        echo json_encode(["success" => false, "error" => $e->getMessage(), "batch_id" => $batchId]);
+        echo json_encode([
+            "success"  => false, 
+            "error"    => $e->getMessage(), 
+            "batch_id" => $batchId,
+            "line"     => $e->getLine(),
+            "file"     => basename($e->getFile())
+        ]);
     }
 }
 
@@ -1211,13 +1296,11 @@ function handle_upload_process($pdo) {
 function up_map_row($row) {
     $ALIAS = [
         'mobile number' => 'mobile_number', 'mobile_number' => 'mobile_number',
-        'number type' => 'number_type', 'number_type' => 'number_type',
         'category' => 'number_category', 'number_category' => 'number_category',
         'base price' => 'base_price', 'base_price' => 'base_price',
         'offer price' => 'offer_price', 'offer_price' => 'offer_price',
         'offer start date' => 'offer_start_date', 'offer_start_date' => 'offer_start_date',
         'offer end date' => 'offer_end_date', 'offer_end_date' => 'offer_end_date',
-        'platform commission' => 'platform_commission', 'platform_commission' => 'platform_commission',
         'number status' => 'number_status', 'number_status' => 'number_status',
         'visibility status' => 'visibility_status', 'visibility_status' => 'visibility_status',
         'inventory source' => 'inventory_source', 'inventory_source' => 'inventory_source',
@@ -1271,9 +1354,50 @@ function up_insert_single($pdo, $table, $row, $dbCols) {
     $ph = implode(',', array_fill(0, count($keys), '?'));
     $params = [];
     foreach ($keys as $k) $params[] = isset($row[$k]) ? $row[$k] : null;
-    $stmt = $pdo->prepare("INSERT INTO `$table` ($colStr) VALUES ($ph)");
-    $stmt->execute($params);
-    return (int)$pdo->lastInsertId();
+
+    try {
+        $stmt = $pdo->prepare("INSERT INTO `$table` ($colStr) VALUES ($ph)");
+        $stmt->execute($params);
+        return (int)$pdo->lastInsertId();
+    } catch (Exception $e) {
+        return 0;
+    }
+}
+
+// ── Upload Processor Helper: upsert single row, return ID ────────────────────
+function up_upsert_single($pdo, $table, $row, $dbCols) {
+    if (empty($row['mobile_number'])) return 0;
+    
+    // Check if number already exists
+    $stmt = $pdo->prepare("SELECT number_id FROM `$table` WHERE mobile_number = ?");
+    $stmt->execute([$row['mobile_number']]);
+    $existingId = $stmt->fetchColumn();
+    
+    if ($existingId) {
+        // Update existing record
+        $keys = array_values(array_filter(array_keys($row), function($k) use ($dbCols) {
+            return $k !== 'number_id' && substr($k, 0, 1) !== '_' && in_array($k, $dbCols, true);
+        }));
+        if (empty($keys)) return (int)$existingId;
+        
+        $setCls = [];
+        $params = [];
+        foreach ($keys as $k) {
+            $setCls[] = "`$k` = ?";
+            $params[] = isset($row[$k]) ? $row[$k] : null;
+        }
+        $params[] = $existingId;
+        
+        try {
+            $pdo->prepare("UPDATE `$table` SET " . implode(', ', $setCls) . " WHERE number_id = ?")->execute($params);
+            return (int)$existingId;
+        } catch (Exception $e) {
+            return 0;
+        }
+    } else {
+        // Insert new record
+        return up_insert_single($pdo, $table, $row, $dbCols);
+    }
 }
 
 // ── STEP A helper: parse CSV ─────────────────────────────────────────────────

@@ -57,10 +57,36 @@ export default function CoupleCard({ item, onToggleCart, isItemInCart }) {
         padding: '20px',
         display: 'flex',
         flexDirection: 'column',
+        height: '100%',
+        boxSizing: 'border-box',
         gap: '20px',
-        gridColumn: 'span 2' // Take double width in grid if possible
+        gridColumn: 'span 2', // Take double width in grid if possible
+        minWidth: '340px'
       }}
     >
+      {hasOffer && (
+        <div style={{
+          position: 'absolute', top: '-14px', left: '16px',
+          background: 'linear-gradient(135deg, var(--danger), #ff4d4d)', color: '#fff', 
+          padding: '4px 14px', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '4px',
+          fontSize: '11px', fontFamily: "var(--font-body)", fontWeight: 700,
+          boxShadow: '0 4px 12px rgba(255,50,50,0.3)', zIndex: 10, whiteSpace: 'nowrap'
+        }}>
+          ★ {disc}% SAVINGS
+        </div>
+      )}
+      {hasOffer && item.updated_at && timeRemaining !== 'Expired' && (
+        <div style={{
+          position: 'absolute', top: '-14px', right: '16px',
+          background: 'linear-gradient(135deg, var(--danger), #ff4d4d)', color: '#fff', 
+          padding: '4px 14px', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '6px', 
+          fontSize: '11px', fontFamily: "var(--font-body)", fontWeight: 700,
+          boxShadow: '0 4px 12px rgba(255,50,50,0.3)', zIndex: 10, whiteSpace: 'nowrap'
+        }}>
+          <Clock size={12} />
+          Ends in: <span style={{ fontFamily: "var(--font-number)" }}>{timeRemaining}</span>
+        </div>
+      )}
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ 
@@ -70,15 +96,6 @@ export default function CoupleCard({ item, onToggleCart, isItemInCart }) {
         }}>
           👫 Couple Pair · {item.couple_label}
         </div>
-        {hasOffer && (
-          <div style={{
-            background: 'rgba(212,175,55,0.1)', border: '1px solid var(--couple)',
-            borderRadius: '6px', padding: '2px 8px', fontSize: '10px', 
-            fontFamily: "var(--font-body)", fontWeight: 700, color: 'var(--couple)'
-          }}>
-            {disc}% BUNDLE SAVINGS
-          </div>
-        )}
       </div>
 
       {/* Numbers Side by Side */}

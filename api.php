@@ -231,13 +231,9 @@ function fn_route_groups_list($pdo) {
             g.group_price as base_price,
             g.group_offer_price as offer_price,
             CASE WHEN g.is_couple = 1 THEN 7 ELSE 8 END as number_category,
-            CASE WHEN g.is_couple = 1 THEN 'Couple Pack' ELSE 'Business Group' END as category_type,
-            CONCAT(g.min_numbers, ' to ', g.max_numbers, ' Numbers') as sub_category,
-            'Premium Bundle' as pattern_name,
-            '99' as vip_score,
+            CASE WHEN g.is_couple = 1 THEN 'Couple Pack' ELSE 'Business Group' END as pattern_name,
             g.group_status as number_status,
-            CASE WHEN g.is_couple = 1 THEN 'couple' ELSE 'group' END as bundle_type,
-            '' as prefix, '' as suffix, 10 as digit_sum, 0 as repeat_count
+            CASE WHEN g.is_couple = 1 THEN 'couple' ELSE 'group' END as bundle_type
         FROM wp_fn_number_groups g
         WHERE g.visibility_status = 1
         AND g.group_status = 'available'
@@ -268,11 +264,11 @@ function fn_route_couples($pdo) {
                          cn.couple_offer_price, cn.couple_status,
                          n1.mobile_number AS number_1,
                          n1.base_price    AS price_1,
-                         n1.category_type AS category_1,
+                         n1.number_category AS category_1,
                          n1.number_id     AS number_id_1,
                          n2.mobile_number AS number_2,
                          n2.base_price    AS price_2,
-                         n2.category_type AS category_2,
+                         n2.number_category AS category_2,
                          n2.number_id     AS number_id_2,
                          cn.updated_at
                   FROM wp_fn_couple_numbers cn
@@ -294,7 +290,7 @@ function fn_route_groups($pdo) {
         $query = "SELECT g.group_id, g.group_name, g.group_type,
                          g.group_price, g.group_offer_price, g.group_status,
                          n.number_id, n.mobile_number, n.base_price,
-                         n.offer_price, n.category_type, n.number_status,
+                         n.offer_price, n.number_category, n.number_status,
                          m.sort_order
                   FROM wp_fn_number_groups g
                   JOIN wp_fn_number_group_members m ON m.group_id = g.group_id
@@ -338,14 +334,26 @@ function fn_route_numbers($pdo) {
 
   // pattern family
   if (!empty($_GET['category_type'])) {
-    $where[]  = 'n.category_type = ?';
-    $params[] = trim($_GET['category_type']);
+    $where[]  = 'n.pattern_name LIKE ?';
+    $params[] = '%' . trim($_GET['category_type']) . '%';
   }
 
-  // pattern variant
+  // pattern variant (REMOVED: sub_category handled by pattern_name)
+  /*
   if (!empty($_GET['sub_category'])) {
     $where[]  = 'n.sub_category = ?';
     $params[] = trim($_GET['sub_category']);
+  }
+  */
+
+  // group / couple filtering
+  if (!empty($_GET['group_id'])) {
+    $where[]  = 'n.group_id = ?';
+    $params[] = trim($_GET['group_id']);
+  }
+  if (!empty($_GET['couple_id'])) {
+    $where[]  = 'n.couple_id = ?';
+    $params[] = trim($_GET['couple_id']);
   }
 
   // search — digits search mobile_number
@@ -356,11 +364,7 @@ function fn_route_numbers($pdo) {
       $where[]  = 'n.mobile_number LIKE ?';
       $params[] = '%' . $q . '%';
     } else {
-      $where[]  = '(n.category_type LIKE ?
-                   OR n.sub_category LIKE ?
-                   OR n.pattern_name LIKE ?)';
-      $params[] = '%'.$q.'%';
-      $params[] = '%'.$q.'%';
+      $where[]  = 'n.pattern_name LIKE ?';
       $params[] = '%'.$q.'%';
     }
   }
@@ -386,13 +390,12 @@ function fn_route_numbers($pdo) {
 
   // sort
   $sort_map = [
-    'vip_desc'    => 'ORDER BY CAST(n.vip_score AS UNSIGNED) DESC',
-    'price_asc'   => 'ORDER BY n.base_price ASC',
     'price_desc'  => 'ORDER BY n.base_price DESC',
-    'created_desc'=> 'ORDER BY n.created_at DESC',
+    'price_asc'   => 'ORDER BY n.base_price ASC',
+    'created_desc'=> 'ORDER BY n.updated_at DESC',
   ];
-  $sort   = $_GET['sort'] ?? 'vip_desc';
-  $order  = $sort_map[$sort] ?? $sort_map['vip_desc'];
+  $sort   = $_GET['sort'] ?? 'price_desc';
+  $order  = $sort_map[$sort] ?? $sort_map['price_desc'];
 
   // pagination
   $limit  = min((int)($_GET['limit']  ?? 12), 2000);
@@ -415,22 +418,18 @@ function fn_route_numbers($pdo) {
        n.number_id,
        n.mobile_number,
        n.number_category,
-       n.category_type,
-       n.sub_category,
        n.pattern_name,
        n.prefix,
        n.suffix,
        n.digit_sum,
-       n.repeat_count,
-       n.vip_score,
        n.base_price,
        n.offer_price,
-       n.offer_start_date,
        n.offer_end_date,
        n.number_status,
        n.bundle_type,
        n.couple_id,
-       n.group_id
+       n.group_id,
+       n.numerology_root
      FROM wp_fn_numbers n
      $where_sql
      $order
@@ -497,8 +496,8 @@ function fn_route_featured($pdo) {
   $stmt = $pdo->query("
     SELECT
       number_id, mobile_number, number_category,
-      category_type, sub_category, pattern_name,
-      base_price, offer_price, offer_end_date, vip_score
+      pattern_name,
+      base_price, offer_price, offer_end_date
     FROM wp_fn_numbers
     WHERE number_status = 'available'
     AND visibility_status = 1
@@ -506,7 +505,7 @@ function fn_route_featured($pdo) {
     AND offer_price > 0
     AND offer_price < base_price
     AND (offer_end_date IS NULL OR offer_end_date > NOW())
-    ORDER BY CAST(vip_score AS UNSIGNED) DESC
+    ORDER BY base_price DESC
     LIMIT 10
   ");
   $rows = $stmt->fetchAll();
@@ -558,27 +557,27 @@ function fn_route_patterns($pdo) {
   $stmt = $pdo->query("
     SELECT
       number_category,
-      category_type,
+      pattern_name,
       COUNT(*) as total,
       MIN(base_price) as min_price,
       MAX(base_price) as max_price
     FROM wp_fn_numbers
     WHERE number_status = 'available'
     AND visibility_status = 1
-    AND category_type IS NOT NULL
-    AND category_type != ''
-    GROUP BY number_category, category_type
+    AND pattern_name IS NOT NULL
+    AND pattern_name != ''
+    AND pattern_name != 'Regular Number'
+    GROUP BY number_category, pattern_name
     ORDER BY number_category ASC, total DESC
   ");
   $rows = $stmt->fetchAll();
 
-  // Group by category number
   $grouped = [];
   foreach ($rows as $row) {
     $cat = $row['number_category'];
     if (!isset($grouped[$cat])) $grouped[$cat] = [];
     $grouped[$cat][] = [
-      'category_type' => $row['category_type'],
+      'pattern_name'  => $row['pattern_name'],
       'total'         => (int)$row['total'],
       'min_price'     => (float)$row['min_price'],
       'max_price'     => (float)$row['max_price'],
@@ -608,12 +607,8 @@ function fn_route_search($pdo) {
     $where[]  = 'mobile_number LIKE ?';
     $params[] = '%'.$q.'%';
   } else {
-    // text search → pattern fields
-    $where[] = '(category_type LIKE ?
-                  OR sub_category LIKE ?
-                  OR pattern_name LIKE ?)';
-    $params[] = '%'.$q.'%';
-    $params[] = '%'.$q.'%';
+    // text search — pattern_name only
+    $where[] = 'pattern_name LIKE ?';
     $params[] = '%'.$q.'%';
   }
 
@@ -628,12 +623,12 @@ function fn_route_search($pdo) {
   $stmt = $pdo->prepare("
     SELECT
       number_id, mobile_number, number_category,
-      category_type, sub_category, pattern_name,
+      pattern_name,
       base_price, offer_price, offer_end_date,
-      vip_score, number_status, bundle_type
+      number_status, bundle_type
     FROM wp_fn_numbers
     $wh
-    ORDER BY CAST(vip_score AS UNSIGNED) DESC
+    ORDER BY base_price DESC
     LIMIT $limit
   ");
   $stmt->execute($params);
@@ -707,10 +702,9 @@ function fn_cart_remove($pdo, $user_id) {
 function fn_get_cart($pdo, $user_id) {
     $sql = "SELECT
                 c.cart_id, c.number_id, c.added_at,
-                n.mobile_number, n.number_category, n.category_type,
-                n.sub_category, n.pattern_name, n.base_price,
-                n.offer_price, n.offer_end_date, n.number_status,
-                n.vip_score
+                n.mobile_number, n.number_category,
+                n.pattern_name, n.base_price,
+                n.offer_price, n.offer_end_date, n.number_status
             FROM wp_fn_cart c
             JOIN wp_fn_numbers n ON n.number_id = c.number_id
             WHERE c.user_id = ?

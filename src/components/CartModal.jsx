@@ -49,9 +49,9 @@ export default function CartModal({ isOpen, onClose, cartItems, onToggleCart }) 
                 <div key={item.number_id || item.id} style={styles.cartItem}>
                   <div style={{ flex: 1 }}>
                     <div style={styles.itemNumber}>{item.mobile_number}</div>
-                    <div style={styles.itemMeta}>
-                       {item.pattern_name || 'VIP Pattern'} · {item.vip_score || 0} Score
-                    </div>
+                     <div style={styles.cartItemDesc}>
+                       {item.pattern_name || 'VIP Pattern'}
+                     </div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <div style={styles.itemPrice}>{formatPrice(getItemPrice(item))}</div>

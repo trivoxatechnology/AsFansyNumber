@@ -51,14 +51,13 @@ export function detectPattern(num) {
     if (result) {
       return {
         name: rule.name,
-        sub: result.sub,
         category: rule.category_id,
         label: result.label || rule.name
       };
     }
   }
 
-  return { name: 'Normal', sub: 'Regular', category: 6, label: 'Regular Number' };
+  return { name: 'Normal', category: 6, label: 'Regular Number' };
 }
 
 // ── Category labels ──────────────────────────────────────────
@@ -70,9 +69,11 @@ export const CATEGORY_LABELS = {
   4: 'Silver',
   5: 'Bronze',
   6: 'Normal',
+  7: 'Couple',
+  8: 'Business',
 };
 
-export const CATEGORIES = [1, 2, 3, 4, 5, 6];
+export const CATEGORIES = [1, 2, 3, 4, 5, 6, 7, 8];
 
 // ── VIP Score (0-100, cumulative) ────────────────────────────
 
@@ -104,23 +105,18 @@ export function calculateVIPScore(num, categoryId, repeatCount, suffix, digitSum
 // ── Full classification ──────────────────────────────────
 
 export function classifyNumber(num) {
-  const detection = detectPattern(num);
-  const repeatCount = getRepeatCount(num);
-  const suffix = getSuffix(num);
-  const digitSum = getDigitSum(num);
-  const score = calculateVIPScore(num, detection.category, repeatCount, suffix, digitSum);
+  const s = String(num).replace(/\D/g, '');
+  const detection = detectPattern(s);
+  const digitSum = getDigitSum(s);
 
   return {
-    pattern_type: detection.name,
+    mobile_number: s,
     pattern_name: detection.label,
-    sub_category: detection.sub,
-    repeat_count: repeatCount,
-    suffix,
-    prefix: getPrefix(num),
+    prefix: getPrefix(s),
+    suffix: getSuffix(s),
     digit_sum: digitSum,
-    vip_score: score,
     number_category: detection.category,
-    category_label: CATEGORY_LABELS[detection.category],
+    numerology_root: digitSum % 9 || 9
   };
 }
 

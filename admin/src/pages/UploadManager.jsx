@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { fetchWithAuth } from '../utils/api';
 import { API_BASE } from '../config/api';
-import { classifyNumber, CATEGORIES, PATTERN_TYPES } from '../utils/PatternEngine';
+import { detectPattern } from '../utils/patternDetector';
 import { useImport } from '../context/ImportContext';
 import { useToast } from '../components/Toast';
 
@@ -43,7 +43,7 @@ function validateRow(row, idx, existingSet) {
   }
 
   const inDbDupe = mobile && existingSet.has(mobile);
-  const pattern = classifyNumber(mobile || '0000000000');
+  const pattern = detectPattern(mobile || '0000000000'); // Use new 117-rule engine
 
   let _status = 'valid';
   if (errors.length > 0) _status = 'error';
@@ -53,11 +53,12 @@ function validateRow(row, idx, existingSet) {
 
   // Helper: use row value if present (including 0), else use fallback
   const v = (val, fb) => (val !== undefined && val !== null && val !== '') ? val : fb;
+  const tierToCid = { 'Diamond': 1, 'Platinum': 2, 'Gold': 3, 'Silver': 4, 'Bronze': 5 };
 
   // Auto-inject bundle_type for Couple (7) and Business (8) categories
-  // IMPORTANT: ALIAS_MAP maps CSV's 'number_category' to 'category', so check both
   const userCat = row.number_category || row.category;
-  const finalCat = v(userCat, pattern.number_category);
+  const autoCat = tierToCid[pattern.pattern_category] || '6';
+  const finalCat = v(userCat, autoCat);
   const nc = String(finalCat);
   let bundle_type = v(row.bundle_type, '');
   if (!bundle_type) {
@@ -79,35 +80,27 @@ function validateRow(row, idx, existingSet) {
     number_category: finalCat,
     base_price: v(row.base_price, ''),
     offer_price: v(row.offer_price, ''),
-    offer_start_date: v(row.offer_start_date, ''),
     offer_end_date: v(row.offer_end_date, ''),
-    platform_commission: v(row.platform_commission, '0'),
     number_status: v(row.number_status, 'available'),
     visibility_status: row.visibility_status !== undefined ? row.visibility_status : '1',
     inventory_source: v(row.inventory_source, ''),
     dealer_id: row.dealer_id || null,
     couple_id: row.couple_number_id || row.couple_id || null,
     group_id: row.group_number_id || row.group_id || null,
-    remarks: v(row.remarks, ''),
-    draft_reason: v(row.draft_reason, ''),
     bundle_type,
 
-    // Type C (Auto-Generated) — explicit checks so 0 values are preserved
-    pattern_name: v(row.pattern_name, pattern.pattern_name),
-    pattern_type: v(row.pattern_type, pattern.pattern_type),
-    prefix: v(row.prefix, pattern.prefix),
-    suffix: v(row.suffix, pattern.suffix),
-    digit_sum: v(row.digit_sum, pattern.digit_sum),
-    repeat_count: v(row.repeat_count, pattern.repeat_count),
-    vip_score: v(row.vip_score, pattern.vip_score),
-    auto_detected: v(row.auto_detected, 1),
-    
+    // Type C (Auto-Generated)
+    pattern_name: pattern.pattern_name || pattern.label,
+    numerology_root: pattern.numerology_root || (pattern.digit_sum % 9 || 9),
+    prefix: pattern.prefix || '',
+    suffix: pattern.suffix || '',
+    digit_sum: pattern.digit_sum || 0,
     // Manual Overrides tracking
     _overrides: {}
   };
 }
 
-function EditableCell({ value, field, rowStatus, errors = [], onChange, options = null }) {
+function EditableCell({ value, onChange, field, options, rowStatus, errors = [] }) {
   const [editing, setEditing] = useState(false);
   const [local, setLocal] = useState(value);
   const hasErr = errors.some(e => e.field === field);
@@ -189,10 +182,10 @@ export default function ImportWorkspace() {
 
   // Known columns our system understands
   const KNOWN_COLS = new Set([
-    'mobile_number', 'number_type', 'category', 'base_price', 'offer_price',
-    'offer_start_date', 'offer_end_date', 'platform_commission', 'number_status',
-    'visibility_status', 'inventory_source', 'dealer_id', 'remarks', 'draft_reason',
-    'pattern_name', 'pattern_type', 'prefix', 'suffix', 'digit_sum', 'repeat_count',
+    'mobile_number', 'number_category', 'category', 'base_price', 'offer_price',
+    'offer_start_date', 'offer_end_date', 'number_status',
+    'visibility_status', 'dealer_id', 'remarks', 'draft_reason',
+    'pattern_name', 'prefix', 'suffix', 'digit_sum',
     'vip_score', 'auto_detected', 'couple_id', 'group_id', 'bundle_type'
   ]);
 
@@ -234,14 +227,11 @@ export default function ImportWorkspace() {
         'price': 'base_price', 'selling_price': 'base_price', 'mrp': 'base_price',
         'amount': 'base_price', 'cost': 'base_price', 'rate': 'base_price',
         'offer': 'offer_price', 'discount_price': 'offer_price', 'sale_price': 'offer_price',
-        'number_category': 'category', 'cat': 'category',
-        'inventory': 'inventory_source', 'source': 'inventory_source', 'file': 'inventory_source',
-        'couple_number_id': 'couple_id', 'couple_no': 'couple_id', 'couple': 'couple_id',
-        'group_number_id': 'group_id', 'group_no': 'group_id', 'group': 'group_id',
-        'dealer': 'dealer_id', 'status': 'number_status', 'type': 'number_type',
+        'number_category': 'category', 'cat': 'category', 'category_id': 'category',
+        'dealer': 'dealer_id', 'status': 'number_status',
         'remark': 'remarks', 'note': 'remarks', 'notes': 'remarks',
-        'commission': 'platform_commission', 'visibility': 'visibility_status',
-        'pattern': 'pattern_type', 'score': 'vip_score',
+        'visibility': 'visibility_status',
+        'pattern': 'pattern_name', 'score': 'vip_score',
       };
 
       const _unmatched = new Set();
@@ -344,6 +334,7 @@ export default function ImportWorkspace() {
   const downloadTemplate = () => {
     const headers = [
       'mobile_number', 'number_type', 'number_category', 'base_price', 'offer_price',
+      'couple_id', 'group_id',
       'offer_start_date', 'offer_end_date', 'platform_commission', 'number_status',
       'visibility_status', 'inventory_source', 'dealer_id', 'remarks', 'draft_reason',
       'pattern_name', 'pattern_type', 'prefix', 'suffix', 'digit_sum', 'repeat_count',
@@ -352,8 +343,10 @@ export default function ImportWorkspace() {
 
     const hints = [
       'REQUIRED — 10 digits, starts 6-9', 'Optional — 1=Prepaid 2=Postpaid 3=Special',
-      'Auto — 1=Diamond 2=Platinum 3=Gold 4=Silver 5=Normal', 'REQUIRED — selling price > 0',
-      'Optional — discount price < base', 'Optional — YYYY-MM-DD HH:MM:SS',
+      'Auto — 1-6 Auto, 7=Couple, 8=Business', 'REQUIRED — selling price > 0',
+      'Optional — discount price < base',
+      'Optional — same ID for pair (e.g. C1)', 'Optional — same ID for group (e.g. G1)',
+      'Optional — YYYY-MM-DD HH:MM:SS',
       'Optional — must be after start', 'Optional — commission in rupees',
       'Optional — defaults to available', 'Optional — 1=Show 0=Hide',
       'Optional — e.g. Direct, Agent', 'REQUIRED — dealer ID number',
@@ -368,22 +361,21 @@ export default function ImportWorkspace() {
 
     // Sheet 1: fn_numbers Import
     const ws = XLSX.utils.aoa_to_sheet([headers, hints]);
-    const wchs = [22, 16, 20, 16, 16, 24, 24, 22, 17, 18, 22, 14, 32, 32, 24, 20, 13, 13, 14, 16, 14, 16];
+    const wchs = [22, 16, 20, 16, 16, 16, 16, 24, 24, 22, 17, 18, 22, 14, 32, 32, 24, 20, 13, 13, 14, 16, 14, 16];
     ws['!cols'] = wchs.map(w => ({ wch: w }));
     XLSX.utils.book_append_sheet(wb, ws, 'fn_numbers Import');
 
     // Sheet 2: Category & Pattern Guide
     const guideData = [
-      ['Pattern Type', 'Category Name', 'Category ID', 'Description'],
-      ['Mirror',      'Diamond',  1, 'Rarest — first half mirrors reverse of second half'],
-      ['Palindrome',  'Diamond',  1, 'Reads same forwards and backwards'],
-      ['Ladder Up',   'Platinum', 2, 'Every digit 1 more than previous'],
-      ['Ladder Down', 'Platinum', 2, 'Every digit 1 less than previous'],
-      ['Repeating',   'Platinum', 2, '3+ consecutive same digits'],
-      ['Double Pair', 'Gold',     3, 'Two or more pairs of repeated digits'],
-      ['Triple',      'Gold',     3, 'Three same digits in sequence'],
-      ['Sequential',  'Silver',   4, 'Run of 4+ ascending or descending digits'],
-      ['Normal',      'Normal',   5, 'No significant pattern detected'],
+      ['Tier / Category', 'Category Name', 'Category ID', 'Description'],
+      ['Diamond',      'Diamond',  '1', 'Top Tier — Pure digits, Perfect Mirrors, Double Sacred'],
+      ['Platinum',     'Platinum', '2', 'Rare Patterns — Penta Stars, Triple Zero Sacred, Twin Sacred'],
+      ['Gold',         'Gold',     '3', 'Premium Patterns — Zero Step, Rising Stars, Flip Numbers'],
+      ['Silver',       'Silver',   '4', 'Standard Patterns — Quad Stars, Twin Couples, Heart patterns'],
+      ['Bronze',       'Bronze',   '5', 'Common Patterns — Triple Ends, Trio Digit, Numerology Root'],
+      ['Normal',       'Normal',   '6', 'Standard numbers with basic patterns'],
+      ['Couple',       'Couple',   '7', 'Pair of matching numbers — use couple_id to link'],
+      ['Business',     'Business', '8', 'Business pack — use group_id to link 2-5 numbers'],
     ];
     const ws2 = XLSX.utils.aoa_to_sheet(guideData);
     ws2['!cols'] = [{ wch: 18 }, { wch: 16 }, { wch: 14 }, { wch: 50 }];
@@ -396,11 +388,25 @@ export default function ImportWorkspace() {
   const handleImport = () => {
     const dest = importDestination;
     const cleanRow = r => {
+      const patternResult = detectPattern(r.mobile_number);
+      const tierToCid = { 'Diamond': 1, 'Platinum': 2, 'Gold': 3, 'Silver': 4, 'Bronze': 5 };
+      
       const payload = {
         ...r,
         inventory_source: fileName,
         visibility_status: dest === 'draft' ? '0' : '1',
+        pattern_code: patternResult.pattern_code,
+        pattern_name: patternResult.pattern_name,
+        pattern_category: patternResult.pattern_category,
+        all_patterns: JSON.stringify(patternResult.all_patterns),
+        numerology_root: patternResult.numerology_root,
       };
+
+      // Auto-assign numeric category if not explicitly set in Excel or if set to 'Normal/6'
+      if (!payload.category || payload.category === '6' || payload.category === '') {
+        payload.category = tierToCid[patternResult.pattern_category] || '6';
+      }
+
       // Strip all internal UI tracking properties before sending to API
       Object.keys(payload).forEach(k => {
         if (k.startsWith('_')) delete payload[k];
@@ -409,14 +415,70 @@ export default function ImportWorkspace() {
     };
     
     // Validate that we have some rows to import
-    const validCount = rows.filter(r => r._status === 'valid' || r._status === 'conflict').length;
-    if (validCount === 0) {
+    const validRows = rows.filter(r => r._status === 'valid' || r._status === 'conflict');
+    if (validRows.length === 0) {
       toast.error('No valid rows or conflicts to import. Please check for errors in Step 1.');
       return;
     }
 
+    // ── Auto-assign couple_id / group_id for category 7/8 rows without explicit IDs ──
+    let autoCoupleSeq = 1;
+    let autoGroupSeq = 1;
+    let coupleQueue = [];
+    let groupRun = [];
+    const enriched = [];
+
+    const flushGroupRun = () => {
+      if (groupRun.length >= 2) {
+        const gid = `auto_g${autoGroupSeq++}`;
+        groupRun.forEach(r => { r.group_id = gid; r.bundle_type = 'group'; });
+      }
+      enriched.push(...groupRun);
+      groupRun = [];
+    };
+
+    const flushCoupleQueue = () => {
+      // Odd leftover goes as solo
+      coupleQueue.forEach(r => enriched.push(r));
+      coupleQueue = [];
+    };
+
+    for (const row of validRows) {
+      const nc = String(row.number_category || '');
+      const hasExplicitCouple = row.couple_id && String(row.couple_id).trim() !== '';
+      const hasExplicitGroup = row.group_id && String(row.group_id).trim() !== '';
+
+      if (nc === '7' && !hasExplicitCouple) {
+        // Flush any open group run
+        if (groupRun.length > 0) flushGroupRun();
+        coupleQueue.push(row);
+        if (coupleQueue.length === 2) {
+          const cid = `auto_c${autoCoupleSeq++}`;
+          coupleQueue[0].couple_id = cid;
+          coupleQueue[0].bundle_type = 'couple';
+          coupleQueue[1].couple_id = cid;
+          coupleQueue[1].bundle_type = 'couple';
+          enriched.push(coupleQueue[0], coupleQueue[1]);
+          coupleQueue = [];
+        }
+      } else if (nc === '8' && !hasExplicitGroup) {
+        // Flush any pending couple orphan
+        if (coupleQueue.length > 0) flushCoupleQueue();
+        groupRun.push(row);
+        if (groupRun.length === 5) flushGroupRun();
+      } else {
+        // Non-couple/group — flush queues
+        if (coupleQueue.length > 0) flushCoupleQueue();
+        if (groupRun.length > 0) flushGroupRun();
+        enriched.push(row);
+      }
+    }
+    // Final flush
+    if (coupleQueue.length > 0) flushCoupleQueue();
+    if (groupRun.length > 0) flushGroupRun();
+
     runBulkImport({
-      rows: rows.filter(r => r._status === 'valid' || r._status === 'conflict'),
+      rows: enriched,
       fileName,
       importDestination: dest,
       operatorName: operatorName.trim() || localStorage.getItem('ag_admin_username') || 'Admin',
@@ -437,8 +499,7 @@ export default function ImportWorkspace() {
   ];
 
   const COLS_STEP2 = [
-    'pattern_name', 'pattern_type', 'prefix', 'suffix', 'digit_sum', 'repeat_count',
-    'vip_score', 'auto_detected'
+    'pattern_category', 'pattern_name', 'numerology_root', 'vip_score'
   ];
 
   return (
@@ -630,19 +691,20 @@ export default function ImportWorkspace() {
                         <td key={c} style={{ ...s.td, padding: 0 }}>
                           <EditableCell 
                             value={String(row[c] ?? '')} 
-                            field={c} 
-                            rowStatus={row._status}
-                            options={c === 'pattern_type' ? PATTERN_TYPES : c === 'auto_detected' ? ['1', '0'] : null}
-                            onChange={(f, v) => {
-                               updateCell(ri, f, v);
-                               if (['pattern_type', 'vip_score'].includes(f)) {
-                                 setRows(prev => {
-                                   const updated = [...prev];
-                                   updated[ri].auto_detected = 0;
-                                   return updated;
-                                 });
-                               }
-                            }}
+                             field={c} 
+                             rowStatus={row._status}
+                             errors={row._errors}
+                             options={c === 'pattern_category' ? ['Diamond', 'Platinum', 'Gold', 'Silver', 'Bronze'] : c === 'auto_detected' ? ['1', '0'] : null}
+                             onChange={(f, v) => {
+                                updateCell(ri, f, v);
+                                if (['pattern_category', 'pattern_name', 'vip_score'].includes(f)) {
+                                  setRows(prev => {
+                                    const updated = [...prev];
+                                    updated[ri].auto_detected = 0;
+                                    return updated;
+                                  });
+                                }
+                             }}
                           />
                         </td>
                       ))}

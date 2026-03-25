@@ -37,23 +37,25 @@ export default function Hero({ filters, onFilterChange, onReset, allNumbers = []
   const [searchInput, setSearchInput] = useState(filters?.query || '');
   const [showFilters, setShowFilters] = useState(false);
   const filterRef = useRef(null);
-  const [stats, setStats] = useState({
-    total_available: 25000,
-    diamond: 450,
-    on_offer: 120
-  });
+  const dynamicStats = useMemo(() => {
+    if (!allNumbers || allNumbers.length === 0) {
+      return { total: 0, diamond: 0, on_offer: 0 };
+    }
+    
+    // Exact count based on current 117-rule assignments
+    const diamond = allNumbers.filter(n => String(n.number_category) === '1').length;
+    const on_offer = allNumbers.filter(n => {
+      const base = parseFloat(n.base_price || 0);
+      const offer = parseFloat(n.offer_price || 0);
+      return offer > 0 && offer < base;
+    }).length;
 
-  useEffect(() => {
-    getStats().then(res => {
-      if (res.success && res.stats) {
-        setStats({
-          total_available: parseInt(res.stats.total_available || 0),
-          diamond: parseInt(res.stats.diamond || 0),
-          on_offer: parseInt(res.stats.on_offer || 0)
-        });
-      }
-    }).catch(err => console.error('Stats load failed:', err));
-  }, []);
+    return {
+      total: allNumbers.length,
+      diamond,
+      on_offer
+    };
+  }, [allNumbers]);
 
   useEffect(() => {
     // Close dropdown on outside click
@@ -67,7 +69,7 @@ export default function Hero({ filters, onFilterChange, onReset, allNumbers = []
   }, []);
 
   const uniquePatterns = useMemo(() => {
-    return [...new Set(allNumbers.map(n => n.pattern_type).filter(Boolean))].sort();
+    return [...new Set(allNumbers.map(n => n.pattern_name).filter(Boolean))].sort();
   }, [allNumbers]);
 
   useEffect(() => {
@@ -139,7 +141,7 @@ export default function Hero({ filters, onFilterChange, onReset, allNumbers = []
 
                 <div style={styles.group}>
                   <label style={styles.label}>Pattern Strategy</label>
-                  <select style={styles.select} value={filters?.pattern_type || ''} onChange={(e) => onFilterChange('pattern_type', e.target.value)}>
+                  <select style={styles.select} value={filters?.pattern_name || ''} onChange={(e) => onFilterChange('pattern_name', e.target.value)}>
                     <option value="">All Strategies</option>
                     {uniquePatterns.map(p => <option key={p} value={p}>{p}</option>)}
                   </select>
@@ -173,17 +175,17 @@ export default function Hero({ filters, onFilterChange, onReset, allNumbers = []
 
         <div style={styles.statsRow}>
           <div style={styles.statItem}>
-            <div style={styles.statVal}><Counter end={stats.total_available} />+</div>
+            <div style={styles.statVal}><Counter end={dynamicStats.total} />+</div>
             <div style={styles.statLabel}>Total Numbers</div>
           </div>
           <div className="stat-divider" style={styles.statDivider}></div>
           <div style={styles.statItem}>
-            <div style={styles.statVal}><Counter end={stats.diamond} />+</div>
+            <div style={styles.statVal}><Counter end={dynamicStats.diamond} />+</div>
             <div style={styles.statLabel}>Diamond Grade</div>
           </div>
           <div className="stat-divider" style={styles.statDivider}></div>
           <div style={styles.statItem}>
-            <div style={styles.statVal}><Counter end={stats.on_offer} />+</div>
+            <div style={styles.statVal}><Counter end={dynamicStats.on_offer} />+</div>
             <div style={styles.statLabel}>Live Offers</div>
           </div>
         </div>

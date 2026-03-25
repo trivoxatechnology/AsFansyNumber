@@ -1,18 +1,65 @@
 <?php
-require_once 'config/db.php'; // Adjust path if needed, usually same as api.php db connection
+/**
+ * DATABASE LITE-SCHEMA CLEANUP
+ * This script automates the removal of redundant columns and synchronizes pattern fields.
+ */
+require_once 'config.php';
 
-header('Content-Type: application/json');
+header('Content-Type: text/plain');
 
 try {
-    // 1. Ensure Category 7 (Couple) and 8 (Business) exist
-    $pdo->exec("INSERT IGNORE INTO wp_fn_number_categories (category_id, category_name, priority, visibility_status) VALUES (7, 'Couple', 7, 1)");
-    $pdo->exec("INSERT IGNORE INTO wp_fn_number_categories (category_id, category_name, priority, visibility_status) VALUES (8, 'Business', 8, 1)");
+    $dsn = "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4";
+    $pdo = new PDO($dsn, DB_USER, DB_PASS, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+    ]);
 
-    // 2. We don't know exactly which foreign key failed, so let's temporarily disable foreign key checks for the session to see if we can identify it, or just drop the strict couple_id constraint if it's meant to be free-text.
-    // Actually, if couple_id is an integer foreign key to wp_fn_number_groups, we should insert a default group to catch NULLs or empty strings mapped to 0.
-    $pdo->exec("INSERT IGNORE INTO wp_fn_number_groups (group_id, group_name, is_couple, min_numbers, max_numbers, group_status) VALUES (0, 'Unassigned Import', 0, 0, 0, 'available')");
+    echo "--- Starting Database Cleanup ---\n\n";
 
-    echo json_encode(["success" => true, "message" => "Database constraints relaxed and missing categories created!"]);
+    // 1. Sync data
+    echo "1. Synchronizing pattern names... ";
+    $pdo->exec("UPDATE `wp_fn_numbers` SET `pattern_name` = COALESCE(`pattern_name`, `category_type`, `pattern_type`, `pattern_code`) WHERE `pattern_name` IS NULL OR `pattern_name` = ''");
+    echo "Done.\n";
+
+    // 2. Fix VIP Score
+    echo "2. Optimizing VIP Score field... ";
+    $pdo->exec("ALTER TABLE `wp_fn_numbers` MODIFY `vip_score` INT(3) DEFAULT 0");
+    echo "Done.\n";
+
+    // 3. Drop redundant columns with "IF EXISTS" style check
+    echo "3. Removing redundant columns:\n";
+    $columns_to_drop = [
+        'number_type', 'category_type', 'pattern_type', 'pattern_code',
+        'auto_detected', 'dealer_id', 'upload_batch_id', 'platform_commission',
+        'inventory_source', 'remarks', 'repeat_count', 'batch_file_name',
+        'pattern_category', 'all_patterns', 'sub_category'
+    ];
+
+    foreach ($columns_to_drop as $col) {
+        try {
+            $pdo->exec("ALTER TABLE `wp_fn_numbers` DROP COLUMN `$col`");
+            echo "   - Removed: $col\n";
+        } catch (Exception $e) {
+            echo "   - Skipped: $col (Already gone or missing)\n";
+        }
+    }
+
+    // 4. Draft Table Cleanup
+    echo "\n4. Cleaning up wp_fn_draft_numbers...\n";
+    try {
+        $pdo->exec("ALTER TABLE `wp_fn_draft_numbers` MODIFY `vip_score` INT(3) DEFAULT 0");
+        foreach ($columns_to_drop as $col) {
+            try { $pdo->exec("ALTER TABLE `wp_fn_draft_numbers` DROP COLUMN `$col` anchor"); } catch(Exception $e){}
+        }
+        echo "   - Draft table cleaned.\n";
+    } catch (Exception $e) {
+        echo "   - Draft table skipped (Doesn't exist).\n";
+    }
+
+    echo "\n--- SUCCESS! ALL CLEANUP COMPLETE ---\n";
+    echo "You can now delete this file (fix_db.php) for security.";
+
 } catch (Exception $e) {
-    echo json_encode(["success" => false, "error" => $e->getMessage()]);
+    echo "\n--- ERROR ---\n";
+    echo $e->getMessage();
 }

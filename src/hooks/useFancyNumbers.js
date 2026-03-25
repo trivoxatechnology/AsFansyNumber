@@ -12,7 +12,7 @@ export function useFancyNumbers() {
   const [filters, setFilters] = useState({
     query: '',
     category: '',
-    pattern_type: '',
+    pattern_name: '',
     digitSum: '',
     maxPrice: 10000000,
     sortOrder: 'default'
@@ -40,11 +40,9 @@ export function useFancyNumbers() {
           is_bundle: true,
           bundle_type: 'couple',
           number_category: '7',
-          // Use bundle price for sorting/filter
           base_price: c.couple_price,
           offer_price: c.couple_offer_price,
-          mobile_number: `${c.number_1} & ${c.number_2}`, 
-          vip_score: 95
+          mobile_number: `${c.number_1} & ${c.number_2}`
         }));
 
         // Process Group Bundles
@@ -59,8 +57,7 @@ export function useFancyNumbers() {
               base_price: g.group_price,
               offer_price: g.group_offer_price,
               numbers: [],
-              mobile_number: '',
-              vip_score: 90
+              mobile_number: ''
             };
           }
           groupMap[g.group_id].numbers.push(g);
@@ -79,19 +76,32 @@ export function useFancyNumbers() {
         const now = new Date();
         const processedSolo = finalSolo.map(n => {
           const classification = classifyNumber(n.mobile_number);
+          
           const resolveCat = () => {
-             const cid = String(n.number_category);
+             const cid = String(n.number_category || n.category || '6');
              if (cid === '7' || cid === '8') return cid;
              const bt = String(n.bundle_type || '').toLowerCase();
              if (bt.includes('couple') || n.couple_id) return '7';
              if (bt.includes('group') || bt.includes('business') || n.group_id) return '8';
-             return classification.number_category;
+             
+             // If the backend has explicitly assigned a premium grade (1 through 5), RESPECT IT.
+             if (['1', '2', '3', '4', '5'].includes(cid)) return cid;
+             
+             // If it's Normal (6) or empty, let the detection engine auto-upgrade it if possible.
+             return String(classification.number_category || '6');
           };
 
+          const finalCat = resolveCat();
+
+          // Merge safely: Backend explicit values > Automatic Classification
           const finalNum = {
-            ...classification,
             ...n,
-            number_category: resolveCat()
+            ...classification,
+            
+            // Re-apply explicit manual overrides from DB
+            pattern_name: (n.pattern_name && n.pattern_name !== 'Regular Number' && typeof n.pattern_name === 'string') ? n.pattern_name : classification.pattern_name,
+            
+            number_category: finalCat
           };
 
           if (n.offer_end_date && new Date(n.offer_end_date) < now) {
@@ -206,24 +216,21 @@ export function useFancyNumbers() {
         
         // Check bundle/type if filtering for Couple (7) or Business (8)
         if (filters.category === '7') {
-          return String(n.bundle_type).toLowerCase().includes('couple') || !!n.couple_id || String(n.category_type).toLowerCase().includes('couple');
+          return String(n.bundle_type).toLowerCase().includes('couple') || !!n.couple_id || String(n.pattern_name).toLowerCase().includes('couple');
         }
         if (filters.category === '8') {
-          return String(n.bundle_type).toLowerCase().includes('group') || String(n.bundle_type).toLowerCase().includes('business') || !!n.group_id || String(n.category_type).toLowerCase().includes('business');
+          return String(n.bundle_type).toLowerCase().includes('group') || String(n.bundle_type).toLowerCase().includes('business') || !!n.group_id || String(n.pattern_name).toLowerCase().includes('business');
         }
         
         return false;
       });
     }
 
-    if (filters.pattern_type) {
-      const pt = String(filters.pattern_type);
+    if (filters.pattern_name) {
+      const pt = String(filters.pattern_name);
       result = result.filter(n => {
-        // Match against all pattern-related fields to handle naming variations
-        return String(n.pattern_type) === pt
-          || String(n.pattern_name) === pt
-          || String(n.category_type) === pt
-          || String(n.sub_category) === pt;
+        // Match against pattern_name for direct mapping
+        return String(n.pattern_name) === pt;
       });
     }
 
@@ -269,7 +276,7 @@ export function useFancyNumbers() {
     setFilters({
       query: '',
       category: '',
-      pattern_type: '',
+      pattern_name: '',
       digitSum: '',
       maxPrice: 10000000,
       sortOrder: 'default'

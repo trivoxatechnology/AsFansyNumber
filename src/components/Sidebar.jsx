@@ -23,7 +23,7 @@ const CATEGORY_OPTIONS = [
 
 export default function Sidebar({ numbers, filters, onFilterChange, onReset }) {
   const uniquePatterns = useMemo(() => {
-    return [...new Set(numbers.map(n => n.pattern_type).filter(Boolean))].sort();
+    return [...new Set(numbers.map(n => n.pattern_name).filter(Boolean))].sort();
   }, [numbers]);
 
   return (
@@ -51,8 +51,8 @@ export default function Sidebar({ numbers, filters, onFilterChange, onReset }) {
           <label style={styles.label}>Pattern Strategy</label>
           <select 
             style={styles.input} 
-            value={filters.pattern_type}
-            onChange={(e) => onFilterChange('pattern_type', e.target.value)}
+            value={filters.pattern_name}
+            onChange={(e) => onFilterChange('pattern_name', e.target.value)}
           >
             <option value="">All Strategies</option>
             {uniquePatterns.map(p => (
