@@ -407,7 +407,7 @@ $allowed_tables = [
     'wp_fn_orders', 'wp_fn_order_items', 'wp_fn_payments', 'wp_fn_sales_log',
     'wp_fn_whatsapp_log', 'wp_fn_number_history', 'wp_fn_number_patterns',
     'wp_fn_featured_numbers', 'wp_fn_dealer_sales', 'wp_fn_platform_commissions',
-    'wp_fn_background_jobs'
+    'wp_fn_background_jobs', 'sync-bundles'
 ];
 
 if (empty($table)) {
@@ -448,6 +448,32 @@ if (in_array($method, ['POST', 'PUT', 'PATCH'])) {
 
 // ── 8. Bulk Route Dispatch (POST only) ───────────────────────────────────────
 if ($method === 'POST') {
+    if ($table === 'sync-bundles') {
+        try {
+            // 1. Clear ghost couple IDs
+            $pdo->exec("UPDATE wp_fn_numbers n LEFT JOIN wp_fn_couple_numbers c ON c.couple_id = n.couple_id SET n.couple_id = NULL WHERE n.couple_id IS NOT NULL AND c.couple_id IS NULL");
+            
+            // 2. Clear ghost group IDs
+            $pdo->exec("UPDATE wp_fn_numbers n LEFT JOIN wp_fn_number_groups g ON g.group_id = n.group_id SET n.group_id = NULL WHERE n.group_id IS NOT NULL AND g.group_id IS NULL");
+
+            // 3. Clear ghost members records
+            $pdo->exec("DELETE m FROM wp_fn_number_group_members m LEFT JOIN wp_fn_number_groups g ON m.group_id = g.group_id WHERE g.group_id IS NULL");
+
+            // 4. Update the Couple Pack references correctly
+            $pdo->exec("UPDATE wp_fn_numbers n JOIN wp_fn_couple_numbers c ON n.number_id = c.number_id_1 SET n.couple_id = c.couple_id");
+            $pdo->exec("UPDATE wp_fn_numbers n JOIN wp_fn_couple_numbers c ON n.number_id = c.number_id_2 SET n.couple_id = c.couple_id");
+
+            // 5. Update Group records correctly
+            $pdo->exec("UPDATE wp_fn_numbers n JOIN wp_fn_number_group_members m ON n.number_id = m.number_id SET n.group_id = m.group_id");
+
+            echo json_encode(["success" => true, "groups_synced" => 1, "couples_synced" => 1]);
+        } catch (Exception $e) {
+            http_response_code(500);
+            echo json_encode(["success" => false, "error" => $e->getMessage()]);
+        }
+        exit;
+    }
+
     if (in_array($table, ['wp_fn_numbers', 'wp_fn_couple_numbers', 'wp_fn_number_groups'])) {
         switch ($action_or_id) {
             case 'bulk-lookup':        handle_bulk_lookup($pdo, $input);                                  exit;

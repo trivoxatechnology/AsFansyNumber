@@ -597,8 +597,14 @@ export default function Inventory() {
                 ))
               ) : viewType === 'couples' ? (
                 filteredItems.map(item => (
-                  <tr key={item.couple_id || Math.random()}>
-                    <td><input type="checkbox" /></td>
+                  <tr key={item.couple_id || Math.random()} className={selectedIds.includes(item.couple_id) ? 'selected' : ''}>
+                    <td>
+                      <input 
+                        type="checkbox" 
+                        checked={selectedIds.includes(item.couple_id)} 
+                        onChange={() => toggleSelect(item.couple_id)}
+                      />
+                    </td>
                     <td><span style={{ fontSize: '11px', color: '#999' }}>#{item.couple_id}</span></td>
                      <td>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -623,8 +629,14 @@ export default function Inventory() {
                 ))
               ) : (
                 filteredItems.map(item => (
-                  <tr key={item.group_id}>
-                    <td><input type="checkbox" /></td>
+                  <tr key={item.group_id} className={selectedIds.includes(item.group_id) ? 'selected' : ''}>
+                    <td>
+                      <input 
+                        type="checkbox" 
+                        checked={selectedIds.includes(item.group_id)} 
+                        onChange={() => toggleSelect(item.group_id)}
+                      />
+                    </td>
                     <td><span style={{ fontSize: '11px', color: '#999' }}>#{item.group_id}</span></td>
                     <td>
                       <div style={{ display: 'flex', flexDirection: 'column' }}>
