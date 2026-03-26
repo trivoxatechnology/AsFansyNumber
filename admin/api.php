@@ -588,13 +588,17 @@ function handle_count($pdo, $table) {
 
 function handle_couples_get($pdo) {
     try {
-        $query = "SELECT cn.*,
-                         n1.mobile_number AS number_1, n1.base_price AS price_1, n1.offer_price AS offer_1,
-                         n2.mobile_number AS number_2, n2.base_price AS price_2, n2.offer_price AS offer_2
-                  FROM wp_fn_couple_numbers cn
-                  LEFT JOIN wp_fn_numbers n1 ON cn.number_id_1 = n1.number_id
-                  LEFT JOIN wp_fn_numbers n2 ON cn.number_id_2 = n2.number_id
-                  ORDER BY cn.couple_id DESC";
+        $query = "
+            SELECT 
+                cn.couple_id, cn.number_id_1, cn.number_id_2, cn.couple_price, cn.couple_offer_price,
+                cn.couple_label, cn.couple_status, cn.visibility_status, cn.created_by, cn.created_at, cn.updated_at,
+                n1.mobile_number AS number_1, n1.base_price AS price_1, n1.offer_price AS offer_1,
+                n2.mobile_number AS number_2, n2.base_price AS price_2, n2.offer_price AS offer_2
+            FROM wp_fn_couple_numbers AS cn
+            LEFT JOIN wp_fn_numbers AS n1 ON cn.number_id_1 = n1.number_id
+            LEFT JOIN wp_fn_numbers AS n2 ON cn.number_id_2 = n2.number_id
+            ORDER BY cn.couple_id DESC
+        ";
         $stmt = $pdo->query($query);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         echo json_encode($rows);
