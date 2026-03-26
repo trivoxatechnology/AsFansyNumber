@@ -7,7 +7,7 @@ export default defineConfig({
   server: {
     port: 5174,
     proxy: {
-      '/fancy_number': {
+      '/fancy_number_admin': {
         target: 'https://asfancynumber.com',
         changeOrigin: true,
         secure: false,
