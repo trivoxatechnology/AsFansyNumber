@@ -74,6 +74,15 @@ export default function Inventory() {
         
         let fetchedItems = Array.isArray(data) ? data : (data?.data || []);
 
+        // --- FIXED: Exclude bundle members from the solo numbers view ---
+        if (viewType === 'numbers') {
+            fetchedItems = fetchedItems.filter(item => {
+                const hasCouple = item.couple_id && item.couple_id !== '0' && item.couple_id !== 0;
+                const hasGroup = item.group_id && item.group_id !== '0' && item.group_id !== 0;
+                return !hasCouple && !hasGroup;
+            });
+        }
+
         // If groups, we might need to group them by group_id if not already
         if (viewType === 'groups') {
             const grouped = {};
