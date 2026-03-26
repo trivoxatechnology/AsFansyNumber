@@ -448,13 +448,27 @@ if (in_array($method, ['POST', 'PUT', 'PATCH'])) {
 
 // ── 8. Bulk Route Dispatch (POST only) ───────────────────────────────────────
 if ($method === 'POST') {
-    if (in_array($table, ['wp_fn_numbers', 'wp_fn_couple_numbers', 'wp_fn_group_numbers'])) {
+    if (in_array($table, ['wp_fn_numbers', 'wp_fn_couple_numbers', 'wp_fn_number_groups'])) {
         switch ($action_or_id) {
             case 'bulk-lookup':        handle_bulk_lookup($pdo, $input);                                  exit;
             case 'bulk-delete':        handle_bulk_delete($pdo, $table, $input);                 exit;
             case 'bulk-move-to-draft': 
-                if ($table === 'wp_fn_numbers') handle_bulk_move($pdo, 'wp_fn_numbers', 'wp_fn_draft_numbers', $input); 
-                else echo json_encode(["success" => false, "error" => "Cannot draft couple/group numbers"]);
+                if ($table === 'wp_fn_numbers') {
+                    handle_bulk_move($pdo, 'wp_fn_numbers', 'wp_fn_draft_numbers', $input); 
+                } else if ($table === 'wp_fn_couple_numbers' || $table === 'wp_fn_number_groups') {
+                    $pkCol = get_pk_name($table);
+                    $ids = array_map('intval', array_slice($input['ids'] ?? [], 0, 5000));
+                    if (empty($ids)) {
+                        echo json_encode(["success" => true, "updated" => 0]); 
+                        exit;
+                    }
+                    $ph = implode(',', array_fill(0, count($ids), '?'));
+                    $stmt = $pdo->prepare("UPDATE `$table` SET visibility_status = 0 WHERE `$pkCol` IN ($ph)");
+                    $stmt->execute($ids);
+                    echo json_encode(["success" => true, "updated" => $stmt->rowCount()]);
+                } else {
+                    echo json_encode(["success" => false, "error" => "Cannot draft these numbers"]);
+                }
                 exit;
             case 'bulk-insert':        handle_bulk_insert($pdo, $table, $input);                 exit;
             case 'bulk-update':        handle_bulk_update($pdo, $table, $input);                 exit;
@@ -1478,6 +1492,8 @@ function handle_bulk_update($pdo, $target, $input) {
         'prefix','suffix','digit_sum','repeat_count',
         'vip_score','auto_detected',
         'base_price','offer_price',
+        'couple_price','couple_offer_price','couple_status',
+        'group_price','group_offer_price','group_status','group_type',
         'offer_start_date','offer_end_date',
         'platform_commission',
         'number_status','visibility_status',
