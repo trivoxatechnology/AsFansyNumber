@@ -507,24 +507,7 @@ function handle_stats($pdo, $table) {
 
     try {
         $thisMonth = date('Y-m-01');
-        $stmt = $pdo->query("
-            SELECT
-                (SELECT COUNT(*) FROM `wp_fn_numbers`) as total,
-                (SELECT COUNT(*) FROM `wp_fn_numbers` WHERE (`couple_id` IS NULL OR `couple_id` = 0) AND (`group_id` IS NULL OR `group_id` = 0)) as solo_total,
-                (SELECT COUNT(*) FROM `wp_fn_couple_numbers`) as total_couples,
-                (SELECT COUNT(*) FROM `wp_fn_number_groups` WHERE `group_type` = 'business' OR `group_type` = 'family') as total_groups,
-                SUM(CASE WHEN `number_status` = 'available' AND (`couple_id` IS NULL OR `couple_id` = 0) AND (`group_id` IS NULL OR `group_id` = 0) THEN 1 ELSE 0 END) as available,
-                SUM(CASE WHEN `number_status` = 'sold' AND (`couple_id` IS NULL OR `couple_id` = 0) AND (`group_id` IS NULL OR `group_id` = 0) THEN 1 ELSE 0 END) as sold,
-                SUM(CASE WHEN `offer_price` > 0 AND `number_status` = 'available' AND (`couple_id` IS NULL OR `couple_id` = 0) AND (`group_id` IS NULL OR `group_id` = 0) THEN 1 ELSE 0 END) as on_offer,
-                SUM(CASE WHEN `base_price` >= 50000 AND (`couple_id` IS NULL OR `couple_id` = 0) AND (`group_id` IS NULL OR `group_id` = 0) THEN 1 ELSE 0 END) as premium,
-                SUM(CASE WHEN number_category=1 THEN 1 ELSE 0 END) as diamond,
-                SUM(CASE WHEN number_category=2 THEN 1 ELSE 0 END) as platinum,
-                SUM(CASE WHEN number_category=3 THEN 1 ELSE 0 END) as gold,
-                SUM(CASE WHEN number_category=4 THEN 1 ELSE 0 END) as silver,
-                SUM(CASE WHEN number_category=5 THEN 1 ELSE 0 END) as bronze,
-                SUM(CASE WHEN number_category=6 THEN 1 ELSE 0 END) as normal
-            FROM `wp_fn_numbers`
-        ");
+        $stmt = $pdo->query("SELECT (SELECT COUNT(*) FROM `wp_fn_numbers`) as total, (SELECT COUNT(*) FROM `wp_fn_numbers` WHERE (`couple_id` IS NULL OR `couple_id` = 0) AND (`group_id` IS NULL OR `group_id` = 0)) as solo_total, (SELECT COUNT(*) FROM `wp_fn_couple_numbers`) as total_couples, (SELECT COUNT(*) FROM `wp_fn_number_groups` WHERE `group_type` = 'business' OR `group_type` = 'family') as total_groups, SUM(CASE WHEN `number_status` = 'available' AND (`couple_id` IS NULL OR `couple_id` = 0) AND (`group_id` IS NULL OR `group_id` = 0) THEN 1 ELSE 0 END) as available, SUM(CASE WHEN `number_status` = 'sold' AND (`couple_id` IS NULL OR `couple_id` = 0) AND (`group_id` IS NULL OR `group_id` = 0) THEN 1 ELSE 0 END) as sold, SUM(CASE WHEN `offer_price` > 0 AND `number_status` = 'available' AND (`couple_id` IS NULL OR `couple_id` = 0) AND (`group_id` IS NULL OR `group_id` = 0) THEN 1 ELSE 0 END) as on_offer, SUM(CASE WHEN `base_price` >= 50000 AND (`couple_id` IS NULL OR `couple_id` = 0) AND (`group_id` IS NULL OR `group_id` = 0) THEN 1 ELSE 0 END) as premium, SUM(CASE WHEN number_category=1 THEN 1 ELSE 0 END) as diamond, SUM(CASE WHEN number_category=2 THEN 1 ELSE 0 END) as platinum, SUM(CASE WHEN number_category=3 THEN 1 ELSE 0 END) as gold, SUM(CASE WHEN number_category=4 THEN 1 ELSE 0 END) as silver, SUM(CASE WHEN number_category=5 THEN 1 ELSE 0 END) as bronze, SUM(CASE WHEN number_category=6 THEN 1 ELSE 0 END) as normal FROM `wp_fn_numbers`");
         $result = $stmt->fetch();
         foreach ($result as $k => $v) { $result[$k] = (float)$v; }
         echo json_encode(["success" => true, "stats" => $result]);
@@ -588,17 +571,7 @@ function handle_count($pdo, $table) {
 
 function handle_couples_get($pdo) {
     try {
-        $query = "
-            SELECT 
-                cn.couple_id, cn.number_id_1, cn.number_id_2, cn.couple_price, cn.couple_offer_price,
-                cn.couple_label, cn.couple_status, cn.visibility_status, cn.created_by, cn.created_at, cn.updated_at,
-                n1.mobile_number AS number_1, n1.base_price AS price_1, n1.offer_price AS offer_1,
-                n2.mobile_number AS number_2, n2.base_price AS price_2, n2.offer_price AS offer_2
-            FROM wp_fn_couple_numbers AS cn
-            LEFT JOIN wp_fn_numbers AS n1 ON cn.number_id_1 = n1.number_id
-            LEFT JOIN wp_fn_numbers AS n2 ON cn.number_id_2 = n2.number_id
-            ORDER BY cn.couple_id DESC
-        ";
+        $query = "SELECT cn.couple_id, cn.number_id_1, cn.number_id_2, cn.couple_price, cn.couple_offer_price, cn.couple_label, cn.couple_status, cn.visibility_status, cn.created_by, cn.created_at, cn.updated_at, n1.mobile_number AS number_1, n1.base_price AS price_1, n1.offer_price AS offer_1, n2.mobile_number AS number_2, n2.base_price AS price_2, n2.offer_price AS offer_2 FROM wp_fn_couple_numbers AS cn LEFT JOIN wp_fn_numbers AS n1 ON cn.number_id_1 = n1.number_id LEFT JOIN wp_fn_numbers AS n2 ON cn.number_id_2 = n2.number_id ORDER BY cn.couple_id DESC";
         $stmt = $pdo->query($query);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         echo json_encode($rows);
@@ -610,14 +583,7 @@ function handle_couples_get($pdo) {
 
 function handle_groups_get($pdo) {
     try {
-        $query = "SELECT g.*,
-                         n.number_id as member_number_id, n.mobile_number, n.base_price as member_base_price,
-                         n.offer_price as member_offer_price, n.number_status as member_status,
-                         m.sort_order
-                  FROM wp_fn_number_groups g
-                  LEFT JOIN wp_fn_number_group_members m ON m.group_id = g.group_id
-                  LEFT JOIN wp_fn_numbers n ON n.number_id = m.number_id
-                  ORDER BY g.group_id DESC, m.sort_order ASC";
+        $query = "SELECT g.*, n.number_id as member_number_id, n.mobile_number, n.base_price as member_base_price, n.offer_price as member_offer_price, n.number_status as member_status, m.sort_order FROM wp_fn_number_groups g LEFT JOIN wp_fn_number_group_members m ON m.group_id = g.group_id LEFT JOIN wp_fn_numbers n ON n.number_id = m.number_id ORDER BY g.group_id DESC, m.sort_order ASC";
         $stmt = $pdo->query($query);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         echo json_encode($rows);
