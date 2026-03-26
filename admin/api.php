@@ -510,12 +510,13 @@ function handle_stats($pdo, $table) {
         $stmt = $pdo->query("
             SELECT
                 (SELECT COUNT(*) FROM `wp_fn_numbers`) as total,
+                (SELECT COUNT(*) FROM `wp_fn_numbers` WHERE (`couple_id` IS NULL OR `couple_id` = 0) AND (`group_id` IS NULL OR `group_id` = 0)) as solo_total,
                 (SELECT COUNT(*) FROM `wp_fn_couple_numbers`) as total_couples,
                 (SELECT COUNT(*) FROM `wp_fn_number_groups` WHERE `group_type` = 'business' OR `group_type` = 'family') as total_groups,
-                SUM(CASE WHEN `number_status` = 'available' THEN 1 ELSE 0 END) as available,
-                SUM(CASE WHEN `number_status` = 'sold' THEN 1 ELSE 0 END) as sold,
-                SUM(CASE WHEN `offer_price` > 0 AND `number_status` = 'available' THEN 1 ELSE 0 END) as on_offer,
-                SUM(CASE WHEN `base_price` >= 50000 THEN 1 ELSE 0 END) as premium,
+                SUM(CASE WHEN `number_status` = 'available' AND (`couple_id` IS NULL OR `couple_id` = 0) AND (`group_id` IS NULL OR `group_id` = 0) THEN 1 ELSE 0 END) as available,
+                SUM(CASE WHEN `number_status` = 'sold' AND (`couple_id` IS NULL OR `couple_id` = 0) AND (`group_id` IS NULL OR `group_id` = 0) THEN 1 ELSE 0 END) as sold,
+                SUM(CASE WHEN `offer_price` > 0 AND `number_status` = 'available' AND (`couple_id` IS NULL OR `couple_id` = 0) AND (`group_id` IS NULL OR `group_id` = 0) THEN 1 ELSE 0 END) as on_offer,
+                SUM(CASE WHEN `base_price` >= 50000 AND (`couple_id` IS NULL OR `couple_id` = 0) AND (`group_id` IS NULL OR `group_id` = 0) THEN 1 ELSE 0 END) as premium,
                 SUM(CASE WHEN number_category=1 THEN 1 ELSE 0 END) as diamond,
                 SUM(CASE WHEN number_category=2 THEN 1 ELSE 0 END) as platinum,
                 SUM(CASE WHEN number_category=3 THEN 1 ELSE 0 END) as gold,
@@ -1614,6 +1615,13 @@ function handle_get($pdo, $table, $id) {
     $offset = max((int)($_GET['offset'] ?? 0), 0);
 
     list($conditions, $params) = build_where_from_get();
+
+    // Auto-exclude bundled numbers from the solo numbers view
+    if ($table === 'wp_fn_numbers') {
+        $conditions[] = '(`couple_id` IS NULL OR `couple_id` = 0)';
+        $conditions[] = '(`group_id` IS NULL OR `group_id` = 0)';
+    }
+
     $where = $conditions ? 'WHERE ' . implode(' AND ', $conditions) : '';
 
     // ORDER BY — expanded whitelist

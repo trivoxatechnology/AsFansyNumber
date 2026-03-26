@@ -324,7 +324,7 @@ export default function Inventory() {
             onClick={() => setViewType('numbers')}
             style={{ borderRadius: '12px' }}
           >
-            Solo Numbers ({stats?.total || 0})
+            Solo Numbers ({stats?.solo_total ?? stats?.total ?? 0})
           </button>
           <button 
             className={`btn ${viewType === 'couples' ? 'btn-primary' : 'btn-secondary'}`}
