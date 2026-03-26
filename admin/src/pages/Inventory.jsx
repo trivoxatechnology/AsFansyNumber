@@ -780,16 +780,16 @@ export default function Inventory() {
                  </div>
                )}
 
-               {/* ── Couples: Number ID editing ── */}
+               {/* ── Couples: Mobile Number editing ── */}
                {viewType === 'couples' && (
                  <>
                    <div className="form-group">
-                      <label>Number 1 ID <span style={{ fontSize: '10px', color: 'var(--primary)' }}>({editingItem.number_1 || 'N/A'})</span></label>
-                      <input type="number" className="input" defaultValue={editingItem.number_id_1 || ''} id="edit-n1-id" />
+                      <label>Number 1 (Mobile) <span style={{ fontSize: '10px', color: '#888' }}>{editingItem.number_id_1 ? `ID:${editingItem.number_id_1}` : ''}</span></label>
+                      <input type="text" className="input" defaultValue={editingItem.number_1 || ''} placeholder="e.g. 9999999999" id="edit-n1-mobile" style={{ fontWeight: 700 }} />
                    </div>
                    <div className="form-group">
-                      <label>Number 2 ID <span style={{ fontSize: '10px', color: 'var(--primary)' }}>({editingItem.number_2 || 'N/A'})</span></label>
-                      <input type="number" className="input" defaultValue={editingItem.number_id_2 || ''} id="edit-n2-id" />
+                      <label>Number 2 (Mobile) <span style={{ fontSize: '10px', color: '#888' }}>{editingItem.number_id_2 ? `ID:${editingItem.number_id_2}` : ''}</span></label>
+                      <input type="text" className="input" defaultValue={editingItem.number_2 || ''} placeholder="e.g. 8888888888" id="edit-n2-mobile" style={{ fontWeight: 700, color: 'var(--primary)' }} />
                    </div>
                    <div className="form-group" style={{ gridColumn: '1 / -1' }}>
                       <label>Couple Label</label>
@@ -798,7 +798,7 @@ export default function Inventory() {
                  </>
                )}
 
-               {/* ── Groups: Name + Member ID editing ── */}
+               {/* ── Groups: Name + Member Mobile editing ── */}
                {viewType === 'groups' && (
                  <>
                    <div className="form-group" style={{ gridColumn: '1 / -1' }}>
@@ -806,20 +806,22 @@ export default function Inventory() {
                      <input type="text" className="input" defaultValue={editingItem.group_name || ''} id="edit-group-name" />
                    </div>
                    <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                     <label style={{ marginBottom: '8px', display: 'block' }}>Member Number IDs</label>
+                     <label style={{ marginBottom: '8px', display: 'block' }}>Group Members (Mobile Numbers)</label>
                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                       {editingItem.members?.length > 0 ? editingItem.members.map((m, idx) => (
+                       {editingItem.members?.map((m, idx) => (
                          <div key={idx} style={{ display: 'flex', gap: '8px', alignItems: 'center', background: '#f8fafc', padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-                           <div style={{ display: 'flex', flexDirection: 'column', minWidth: '90px' }}>
-                             <span style={{ fontSize: '12px', fontWeight: 700 }}>{m.mobile_number || 'N/A'}</span>
-                             <span style={{ fontSize: '9px', color: '#999' }}>{m.member_status || ''}</span>
-                           </div>
-                           <input type="number" className="input edit-group-member-id" defaultValue={m.member_number_id} style={{ height: '30px', fontSize: '12px', flex: 1 }} />
+                           <input type="text" className="input edit-group-member-mobile" defaultValue={m.mobile_number || ''} placeholder="e.g. 9999999999" style={{ height: '30px', fontSize: '13px', flex: 1, fontWeight: 700 }} />
+                           <span style={{ fontSize: '9px', color: '#999', minWidth: '40px' }}>ID: {m.member_number_id}</span>
                          </div>
-                       )) : (
-                         <span style={{ fontSize: '12px', color: '#999', gridColumn: '1 / -1' }}>No members. Click "Repair" in the header to sync data.</span>
-                       )}
+                       ))}
+                       {/* Add extra empty slots to allow adding new members safely */}
+                       {Array.from({ length: 4 }).map((_, idx) => (
+                         <div key={`new-${idx}`} style={{ display: 'flex', gap: '8px', alignItems: 'center', background: '#f8fafc', padding: '8px', borderRadius: '6px', border: '1px dashed #cbd5e1' }}>
+                           <input type="text" className="input edit-group-member-mobile" placeholder="+ Add mobile number" style={{ height: '30px', fontSize: '12px', flex: 1, border: 'none', background: 'transparent' }} />
+                         </div>
+                       ))}
                      </div>
+                     <span style={{ fontSize: '11px', color: '#666', marginTop: '8px', display: 'block' }}>Leave inputs blank to remove/ignore members.</span>
                    </div>
                  </>
                )}
@@ -856,21 +858,21 @@ export default function Inventory() {
                   endpoint = `${API_BASE}/wp_fn_couple_numbers/${editingItem.couple_id}`;
                   const base = document.getElementById('edit-base-price').value;
                   const offer = document.getElementById('edit-offer-price').value;
-                  const n1 = document.getElementById('edit-n1-id').value;
-                  const n2 = document.getElementById('edit-n2-id').value;
+                  const n1 = document.getElementById('edit-n1-mobile').value;
+                  const n2 = document.getElementById('edit-n2-mobile').value;
                   const label = document.getElementById('edit-couple-label').value;
-                  payload = { couple_price: base, couple_offer_price: offer, number_id_1: n1, number_id_2: n2, couple_label: label, couple_status: status };
+                  payload = { couple_price: base, couple_offer_price: offer, number_1: n1, number_2: n2, couple_label: label, couple_status: status };
                 } else if (viewType === 'groups') {
                   endpoint = `${API_BASE}/wp_fn_number_groups/${editingItem.group_id}`;
                   const base = document.getElementById('edit-base-price').value;
                   const offer = document.getElementById('edit-offer-price').value;
                   const groupName = document.getElementById('edit-group-name').value;
                   
-                  // Collect member IDs
-                  const memberInputs = document.querySelectorAll('.edit-group-member-id');
-                  const memberIds = Array.from(memberInputs).map(i => i.value).filter(v => v);
+                  // Collect member mobile numbers
+                  const memberInputs = document.querySelectorAll('.edit-group-member-mobile');
+                  const memberMobiles = Array.from(memberInputs).map(i => i.value.trim()).filter(v => v);
                   
-                  payload = { group_price: base, group_offer_price: offer, group_name: groupName, group_status: status, members: memberIds };
+                  payload = { group_price: base, group_offer_price: offer, group_name: groupName, group_status: status, members: memberMobiles };
                 }
 
                 const res = await putWithAuth(endpoint, payload);

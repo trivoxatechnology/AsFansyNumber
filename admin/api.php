@@ -1711,6 +1711,27 @@ function build_field_list($table) {
     return $clean ? '`' . implode('`, `', $clean) . '`' : '*';
 }
 
+/**
+ * Helper to resolve a mobile number string to a database ID.
+ * If the number does not exist in wp_fn_numbers, it creates a new entry and returns the new ID.
+ */
+function fn_resolve_mobile_to_id($pdo, $mobile_number) {
+    if (empty($mobile_number)) return null;
+    $clean_number = preg_replace('/[^0-9]/', '', $mobile_number);
+    if (strlen($clean_number) < 5) return null; // safety check
+    
+    $stmt = $pdo->prepare("SELECT number_id FROM wp_fn_numbers WHERE mobile_number = ?");
+    $stmt->execute([$clean_number]);
+    $existing = $stmt->fetchColumn();
+    
+    if ($existing) return (int)$existing;
+    
+    // Auto-create to prevent orphans
+    $ins = $pdo->prepare("INSERT INTO wp_fn_numbers (mobile_number, number_status, visibility_status) VALUES (?, 'available', 1)");
+    $ins->execute([$clean_number]);
+    return (int)$pdo->lastInsertId();
+}
+
 function handle_post($pdo, $table, $input) {
     if (empty($input)) {
         http_response_code(400);
@@ -1722,6 +1743,16 @@ function handle_post($pdo, $table, $input) {
     $members = $input['members'] ?? null;
     
     foreach ($input as $k => $v) {
+        if ($table === 'wp_fn_couple_numbers') {
+            if ($k === 'number_1') {
+                $safeInput['number_id_1'] = fn_resolve_mobile_to_id($pdo, $v);
+                continue;
+            }
+            if ($k === 'number_2') {
+                $safeInput['number_id_2'] = fn_resolve_mobile_to_id($pdo, $v);
+                continue;
+            }
+        }
         if ($k === 'members') continue; // specialized logic below
         if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $k)) {
             $safeInput[$k] = $v;
@@ -1745,10 +1776,13 @@ function handle_post($pdo, $table, $input) {
         if ($table === 'wp_fn_number_groups' && is_array($members)) {
             $ins = $pdo->prepare("INSERT INTO `wp_fn_number_group_members` (group_id, number_id, sort_order) VALUES (?, ?, ?)");
             $updNum = $pdo->prepare("UPDATE `wp_fn_numbers` SET group_id = ? WHERE number_id = ?");
-            foreach ($members as $idx => $m_id) {
-                if ($m_id) {
-                    $ins->execute([$newId, $m_id, $idx]);
-                    $updNum->execute([$newId, $m_id]);
+            foreach ($members as $idx => $m_val) {
+                if ($m_val) {
+                    $m_id = fn_resolve_mobile_to_id($pdo, $m_val);
+                    if ($m_id) {
+                        $ins->execute([$newId, $m_id, $idx]);
+                        $updNum->execute([$newId, $m_id]);
+                    }
                 }
             }
         }
@@ -1782,6 +1816,21 @@ function handle_put($pdo, $table, $id, $input) {
     $vals = [];
 
     foreach ($input as $k => $v) {
+        if ($table === 'wp_fn_couple_numbers') {
+            if ($k === 'number_1' && !empty($v)) {
+                $sets[] = "`number_id_1` = ?";
+                $vals[] = fn_resolve_mobile_to_id($pdo, $v);
+                continue;
+            } else if ($k === 'number_1') continue;
+
+            if ($k === 'number_2' && !empty($v)) {
+                $sets[] = "`number_id_2` = ?";
+                $vals[] = fn_resolve_mobile_to_id($pdo, $v);
+                continue;
+            } else if ($k === 'number_2') continue;
+        }
+        if ($k === 'members') continue; 
+        
         if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $k)) {
             $sets[] = "`$k` = ?";
             $vals[] = $v;
@@ -1811,10 +1860,13 @@ function handle_put($pdo, $table, $id, $input) {
             // Re-insert & Update numbers
             $ins = $pdo->prepare("INSERT INTO `wp_fn_number_group_members` (group_id, number_id, sort_order) VALUES (?, ?, ?)");
             $updNum = $pdo->prepare("UPDATE `wp_fn_numbers` SET group_id = ? WHERE number_id = ?");
-            foreach ($input['members'] as $idx => $m_id) {
-                if ($m_id) {
-                    $ins->execute([$id, $m_id, $idx]);
-                    $updNum->execute([$id, $m_id]);
+            foreach ($input['members'] as $idx => $m_val) {
+                if ($m_val) {
+                    $m_id = fn_resolve_mobile_to_id($pdo, $m_val);
+                    if ($m_id) {
+                        $ins->execute([$id, $m_id, $idx]);
+                        $updNum->execute([$id, $m_id]);
+                    }
                 }
             }
         }
