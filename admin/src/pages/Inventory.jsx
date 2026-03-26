@@ -588,26 +588,20 @@ export default function Inventory() {
                 ))
               ) : viewType === 'couples' ? (
                 filteredItems.map(item => (
-                  <tr key={item.couple_id}>
+                  <tr key={item.couple_id || Math.random()}>
                     <td><input type="checkbox" /></td>
                     <td><span style={{ fontSize: '11px', color: '#999' }}>#{item.couple_id}</span></td>
                      <td>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <span style={{ fontWeight: 800 }}>{item.number_1 || 'Missing #1'}</span>
-                          {item.g1_id && <span style={{ fontSize: '9px', background: '#fef3c7', color: '#92400e', padding: '1px 4px', borderRadius: '3px', fontWeight: 700 }}>GROUP</span>}
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <span style={{ fontWeight: 800, color: 'var(--primary)' }}>{item.number_2 || 'Missing #2'}</span>
-                          {item.g2_id && <span style={{ fontSize: '9px', background: '#fef3c7', color: '#92400e', padding: '1px 4px', borderRadius: '3px', fontWeight: 700 }}>GROUP</span>}
-                        </div>
+                        <span style={{ fontWeight: 800 }}>{item.number_1 || `ID:${item.number_id_1 || '?'}`}</span>
+                        <span style={{ fontWeight: 800, color: 'var(--primary)' }}>{item.number_2 || `ID:${item.number_id_2 || '?'}`}</span>
                       </div>
                     </td>
                     <td><span style={{ fontSize: '12px', fontWeight: 600 }}>{item.couple_label || 'Couple Pack'}</span></td>
-                    <td style={{ fontWeight: 700 }}>₹{item.couple_price}</td>
+                    <td style={{ fontWeight: 700 }}>₹{item.couple_price || 0}</td>
                     <td style={{ color: 'var(--danger)', fontWeight: 700 }}>{item.couple_offer_price ? `₹${item.couple_offer_price}` : '-'}</td>
                     <td>
-                      <select value={item.couple_status} className="input-select-inline" onChange={(e) => handleQuickUpdate(item.couple_id, 'couple_status', e.target.value)}>
+                      <select value={item.couple_status || 'available'} className="input-select-inline" onChange={(e) => handleQuickUpdate(item.couple_id, 'couple_status', e.target.value)}>
                         <option value="available">Available</option>
                         <option value="booked">Booked</option>
                         <option value="sold">Sold</option>
