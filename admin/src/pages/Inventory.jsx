@@ -3,7 +3,7 @@ import {
   Search, Filter, 
   Trash2, Archive, Edit3, Copy, Check, X,
   ChevronDown, ChevronUp, MoreHorizontal, 
-  Tag, DollarSign, Calendar, Eye, AlertCircle
+  Tag, DollarSign, Calendar, Eye, AlertCircle, RefreshCw
 } from 'lucide-react';
 import { getWithAuth, putWithAuth, postWithAuth, deleteWithAuth, safeJson } from '../utils/api';
 import { API_BASE } from '../config/api';
@@ -47,19 +47,52 @@ export default function Inventory() {
   const [dealers, setDealers] = useState([]);
   const [showFilters, setShowFilters] = useState(false);
   const [selectCount, setSelectCount] = useState('');
+  
+  // View types: 'numbers', 'couples', 'groups'
+  const [viewType, setViewType] = useState('numbers');
+  const [stats, setStats] = useState(null);
+
+  const fetchStats = useCallback(async () => {
+    try {
+      const res = await getWithAuth(`${API_BASE}/wp_fn_numbers/stats`);
+      const data = await safeJson(res);
+      if (data?.success) setStats(data.stats);
+    } catch (err) {
+      console.error("Failed to fetch stats", err);
+    }
+  }, []);
 
   const fetchInventory = useCallback(async () => {
     setLoading(true);
     try {
-        const res = await getWithAuth(`${API_BASE}/wp_fn_numbers?limit=10000&order=number_id&dir=desc`);
+        let endpoint = `${API_BASE}/wp_fn_numbers?limit=10000&order=number_id&dir=desc`;
+        if (viewType === 'couples') endpoint = `${API_BASE}/couples`;
+        if (viewType === 'groups') endpoint = `${API_BASE}/groups`;
+
+        const res = await getWithAuth(endpoint);
         const data = await safeJson(res);
-        setItems(Array.isArray(data) ? data : (data?.data || []));
+        
+        let fetchedItems = Array.isArray(data) ? data : (data?.data || []);
+
+        // If groups, we might need to group them by group_id if not already
+        if (viewType === 'groups') {
+            const grouped = {};
+            fetchedItems.forEach(item => {
+                if (!grouped[item.group_id]) {
+                    grouped[item.group_id] = { ...item, members: [] };
+                }
+                grouped[item.group_id].members.push(item);
+            });
+            fetchedItems = Object.values(grouped);
+        }
+
+        setItems(fetchedItems);
     } catch (err) {
         console.error("Failed to fetch inventory", err);
     } finally {
         setLoading(false);
     }
-  }, []);
+  }, [viewType]);
 
   const fetchDealers = useCallback(async () => {
     try {
@@ -74,30 +107,40 @@ export default function Inventory() {
   useEffect(() => {
     fetchInventory();
     fetchDealers();
-  }, [fetchInventory, fetchDealers]);
+    fetchStats();
+  }, [fetchInventory, fetchDealers, fetchStats]);
 
   const filteredItems = useMemo(() => {
     if (!Array.isArray(items)) return [];
     return items.filter(item => {
       const s = debouncedSearch.toLowerCase();
-      const num = String(item.mobile_number).toLowerCase();
-      if (s && !num.includes(s)) return false;
+      
+      let searchableText = "";
+      if (viewType === 'numbers') searchableText = String(item.mobile_number);
+      else if (viewType === 'couples') searchableText = `${item.number_1} ${item.number_2} ${item.couple_label}`;
+      else if (viewType === 'groups') searchableText = `${item.group_name} ${item.members?.map(m => m.mobile_number).join(' ')}`;
 
-      if (filters.category && item.number_category !== filters.category) return false;
-      if (filters.pattern && item.pattern_name !== filters.pattern) return false;
-      if (filters.status && item.number_status !== filters.status) return false;
+      if (s && !searchableText.toLowerCase().includes(s)) return false;
+
+      if (viewType === 'numbers') {
+        if (filters.category && item.number_category !== filters.category) return false;
+        if (filters.pattern && item.pattern_name !== filters.pattern) return false;
+        if (filters.status && item.number_status !== filters.status) return false;
+      } else if (viewType === 'couples') {
+        if (filters.status && item.couple_status !== filters.status) return false;
+      } else if (viewType === 'groups') {
+        if (filters.status && item.group_status !== filters.status) return false;
+      }
+
       if (filters.dealer && String(item.dealer_id) !== String(filters.dealer)) return false;
 
-      const price = parseFloat(item.base_price) || 0;
+      const price = parseFloat(viewType === 'numbers' ? item.base_price : (viewType === 'couples' ? item.couple_price : item.group_price)) || 0;
       if (filters.priceMin && price < parseFloat(filters.priceMin)) return false;
       if (filters.priceMax && price > parseFloat(filters.priceMax)) return false;
 
-      if (filters.startDate && new Date(item.created_at) < new Date(filters.startDate)) return false;
-      if (filters.endDate && new Date(item.created_at) > new Date(filters.endDate)) return false;
-
       return true;
     });
-  }, [items, debouncedSearch, filters]);
+  }, [items, debouncedSearch, filters, viewType]);
 
   // Unique file sources for select-by-file
   const fileSources = useMemo(() => {
@@ -137,15 +180,28 @@ export default function Inventory() {
   };
 
   const toggleSelect = (id) => {
+    const item = items.find(i => (viewType === 'numbers' ? i.number_id : (viewType === 'couples' ? i.couple_id : i.group_id)) === id);
+    if (viewType === 'numbers' && item && (item.couple_id || item.group_id)) {
+      toast.error('This number is part of a bundle and cannot be selected individually.');
+      return;
+    }
     setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   };
   const handleQuickUpdate = async (id, field, value) => {
-    const res = await putWithAuth(`${API_BASE}/wp_fn_numbers/${id}`, { [field]: value });
+    let endpoint = `${API_BASE}/wp_fn_numbers/${id}`;
+    if (viewType === 'couples') endpoint = `${API_BASE}/wp_fn_couple_numbers/${id}`;
+    if (viewType === 'groups') endpoint = `${API_BASE}/wp_fn_number_groups/${id}`;
+
+    const res = await putWithAuth(endpoint, { [field]: value });
     if (res.ok) {
-      setItems(prev => prev.map(item => item.number_id === id ? { ...item, [field]: value } : item));
-      toast.success('Number updated successfully');
+      setItems(prev => prev.map(item => {
+        const itemId = viewType === 'numbers' ? item.number_id : (viewType === 'couples' ? item.couple_id : item.group_id);
+        return itemId === id ? { ...item, [field]: value } : item;
+      }));
+      toast.success('Updated successfully');
+      fetchStats();
     } else {
-      toast.error('Failed to update number');
+      toast.error('Failed to update');
     }
   };
 
@@ -154,26 +210,46 @@ export default function Inventory() {
     toast.success('Copied to clipboard');
   };
 
+  const handleSyncBundles = async () => {
+    try {
+      const res = await postWithAuth(`${API_BASE}/sync-bundles`, {});
+      if (res.ok) {
+        const data = await res.json();
+        toast.success(`Sync complete: ${data.groups_synced} groups, ${data.couples_synced} couples updated.`);
+        fetchInventory();
+        fetchStats();
+      } else {
+        toast.error('Sync failed');
+      }
+    } catch (e) {
+      toast.error('Network error during sync');
+    }
+  };
+
   const bulkAction = async (action) => {
     if (!selectedIds.length) return;
     
-    let endpoint = `${API_BASE}/wp_fn_numbers/bulk-update`;
+    let targetTable = 'wp_fn_numbers';
+    if (viewType === 'couples') targetTable = 'wp_fn_couple_numbers';
+    if (viewType === 'groups') targetTable = 'wp_fn_number_groups';
+
+    let endpoint = `${API_BASE}/${targetTable}/bulk-update`;
     let data = { ids: selectedIds, data: {} };
     let opType = 'updated';
 
     if (action === 'delete') {
-      endpoint = `${API_BASE}/wp_fn_numbers/bulk-delete`;
+      endpoint = `${API_BASE}/${targetTable}/bulk-delete`;
       data = { ids: selectedIds };
       opType = 'deleted';
     } else if (action === 'draft') {
-      endpoint = `${API_BASE}/wp_fn_numbers/bulk-move-to-draft`;
+      endpoint = `${API_BASE}/${targetTable}/bulk-move-to-draft`;
       data = { ids: selectedIds };
       opType = 'moved_to_draft';
     }
 
     await runWithLog({
       operationType: opType,
-      tableName: 'wp_fn_numbers',
+      tableName: targetTable,
       fileName: selectedFileName,
       totalRecords: selectedIds.length,
       operationData: `${opType} IDs: ${selectedIds.slice(0, 20).join(',')}${selectedIds.length > 20 ? '...' : ''}`,
@@ -236,6 +312,55 @@ export default function Inventory() {
       {/* Header Section */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0 }}>Inventory Manager</h2>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button className="btn btn-outline btn-sm" onClick={handleSyncBundles} title="Repair bundle relationships">
+            <RefreshCw size={14} style={{ marginRight: '4px' }} /> Repair
+          </button>
+          <button className="btn btn-secondary btn-sm" onClick={() => { fetchStats(); fetchInventory(); }}>
+             <Archive size={14} /> Sync
+          </button>
+          <button 
+            className={`btn ${viewType === 'numbers' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setViewType('numbers')}
+            style={{ borderRadius: '12px' }}
+          >
+            Solo Numbers ({stats?.total || 0})
+          </button>
+          <button 
+            className={`btn ${viewType === 'couples' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setViewType('couples')}
+            style={{ borderRadius: '12px' }}
+          >
+            Couple Packs ({stats?.total_couples || 0})
+          </button>
+          <button 
+            className={`btn ${viewType === 'groups' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setViewType('groups')}
+            style={{ borderRadius: '12px' }}
+          >
+            Business Groups ({stats?.total_groups || 0})
+          </button>
+        </div>
+      </div>
+
+      {/* Stats Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px' }}>
+        <div className="card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Individual (Available)</span>
+            <span style={{ fontSize: '1.5rem', fontWeight: 700 }}>{stats?.available || 0}</span>
+        </div>
+        <div className="card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Sold Numbers</span>
+            <span style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--danger)' }}>{stats?.sold || 0}</span>
+        </div>
+        <div className="card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Premium (₹50k+)</span>
+            <span style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--gold-text)' }}>{stats?.premium || 0}</span>
+        </div>
+        <div className="card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Active Offers</span>
+            <span style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--primary)' }}>{stats?.on_offer || 0}</span>
+        </div>
       </div>
 
       {/* Top Search & Filter Bar */}
@@ -356,87 +481,173 @@ export default function Inventory() {
         <div style={{ overflowX: 'auto' }}>
           <table className="table" style={{ tableLayout: 'auto', whiteSpace: 'nowrap' }}>
             <thead>
-              <tr>
-                <th style={{ width: '40px' }}>
-                  <input type="checkbox" checked={selectedIds.length === filteredItems.length && filteredItems.length > 0} onChange={toggleSelectAll} />
-                </th>
-                <th>Mobile Number</th>
-                <th>Category</th>
-                <th>Pattern</th>
-                <th>Base Price</th>
-                <th>Offer Price</th>
-                <th>Status</th>
-                <th>Dealer</th>
-                <th>Actions</th>
-              </tr>
+              {viewType === 'numbers' ? (
+                <tr>
+                  <th style={{ width: '40px' }}>
+                    <input type="checkbox" checked={selectedIds.length === filteredItems.length && filteredItems.length > 0} onChange={toggleSelectAll} />
+                  </th>
+                  <th>Num ID</th>
+                  <th>Number</th>
+                  <th>Category</th>
+                  <th>Pattern</th>
+                  <th>Couple ID</th>
+                  <th>Group ID</th>
+                  <th>Base Price</th>
+                  <th>Offer Price</th>
+                  <th>Status</th>
+                  <th>Dealer</th>
+                  <th>Actions</th>
+                </tr>
+              ) : viewType === 'couples' ? (
+                <tr>
+                  <th style={{ width: '40px' }}>
+                    <input type="checkbox" />
+                  </th>
+                  <th>CP-ID</th>
+                  <th>Couple Numbers</th>
+                  <th>Label</th>
+                  <th>Pair Price (₹)</th>
+                  <th>Offer Price (₹)</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              ) : (
+                <tr>
+                  <th style={{ width: '40px' }}>
+                    <input type="checkbox" />
+                  </th>
+                  <th>BG-ID</th>
+                  <th>Group Name / Members</th>
+                  <th>Type</th>
+                  <th>Qty</th>
+                  <th>Group Price (₹)</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              )}
             </thead>
             <tbody>
               {loading ? (
                 Array(10).fill(0).map((_, i) => (
                   <tr key={i}>
-                    <td colSpan="9"><div className="skeleton" style={{ height: '40px', margin: '8px 0' }} /></td>
+                    <td colSpan="10"><div className="skeleton" style={{ height: '40px', margin: '8px 0' }} /></td>
                   </tr>
                 ))
               ) : filteredItems.length === 0 ? (
                 <tr>
-                  <td colSpan="9" style={{ textAlign: 'center', padding: '100px', color: '#999' }}>
+                  <td colSpan="10" style={{ textAlign: 'center', padding: '100px', color: '#999' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
                       <AlertCircle size={48} />
-                      <p>No numbers found matching your criteria.</p>
+                      <p>No {viewType} found matching your criteria.</p>
                       <button className="btn btn-secondary" onClick={() => setSearchTerm('')}>Clear Search</button>
                     </div>
                   </td>
                 </tr>
-              ) : (
+              ) : viewType === 'numbers' ? (
                 filteredItems.slice(0, 100).map(item => (
                   <tr key={item.number_id} className={selectedIds.includes(item.number_id) ? 'selected' : ''}>
                     <td>
-                      <input type="checkbox" checked={selectedIds.includes(item.number_id)} onChange={() => toggleSelect(item.number_id)} />
+                      <input 
+                        type="checkbox" 
+                        checked={selectedIds.includes(item.number_id)} 
+                        onChange={() => toggleSelect(item.number_id)} 
+                        disabled={!!item.couple_id || !!item.group_id}
+                      />
                     </td>
+                    <td><span style={{ fontSize: '11px', color: '#999' }}>#{item.number_id}</span></td>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <span style={{ fontWeight: 800, fontSize: '1rem', color: 'var(--text-primary)' }}>{item.mobile_number}</span>
-                        <Copy 
-                          size={13} 
-                          style={{ cursor: 'pointer', color: 'var(--text-secondary)' }} 
-                          onClick={() => copyToClipboard(item.mobile_number)} 
-                        />
+                        <Copy size={13} style={{ cursor: 'pointer', color: '#999' }} onClick={() => copyToClipboard(item.mobile_number)} />
                       </div>
                     </td>
-                    <td>{renderCategoryBadge(item.number_category)}</td>
-                    <td>
-                      <span style={{ fontSize: '11px', color: '#888', fontWeight: 600 }}>{item.pattern_name || '-'}</span>
+                     <td>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        {renderCategoryBadge(item.number_category)}
+                        {item.couple_id && <span style={{ fontSize: '10px', background: 'var(--primary-bg)', color: 'var(--primary)', padding: '2px 6px', borderRadius: '4px', width: 'fit-content', fontWeight: 700 }}>COUPLE</span>}
+                        {item.group_id && <span style={{ fontSize: '10px', background: '#fef3c7', color: '#92400e', padding: '2px 6px', borderRadius: '4px', width: 'fit-content', fontWeight: 700 }}>GROUP</span>}
+                      </div>
                     </td>
-                    <td style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+                    <td><span style={{ fontSize: '11px', color: '#888', fontWeight: 600 }}>{item.pattern_name || '-'}</span></td>
+                    <td>{item.couple_id ? <span style={{ fontSize: '11px', color: 'var(--primary)', fontWeight: 700 }}>#{item.couple_id}</span> : '-'}</td>
+                    <td>{item.group_id ? <span style={{ fontSize: '11px', color: '#92400e', fontWeight: 700 }}>#{item.group_id}</span> : '-'}</td>
+                    <td style={{ fontWeight: 700 }}>₹{item.base_price}</td>
+                    <td>{item.offer_price ? `₹${item.offer_price}` : '-'}</td>
+                    <td>
+                      <select value={item.number_status} className="input-select-inline" onChange={(e) => handleQuickUpdate(item.number_id, 'number_status', e.target.value)}>
+                        <option value="available">Available</option>
+                        <option value="booked">Booked</option>
+                        <option value="sold">Sold</option>
+                      </select>
+                    </td>
+                    <td><span style={{ fontSize: '12px', color: '#aaa' }}>{item.dealer_name || 'Direct'}</span></td>
+                    <td>
+                      <button className="btn-icon" onClick={() => setEditingItem(item)}><Edit3 size={15} /></button>
+                    </td>
+                  </tr>
+                ))
+              ) : viewType === 'couples' ? (
+                filteredItems.map(item => (
+                  <tr key={item.couple_id}>
+                    <td><input type="checkbox" /></td>
+                    <td><span style={{ fontSize: '11px', color: '#999' }}>#{item.couple_id}</span></td>
+                     <td>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          ₹{item.base_price}
-                          <Edit3 size={12} style={{ color: 'var(--text-secondary)', cursor: 'pointer' }} onClick={() => setEditingItem(item)} />
+                          <span style={{ fontWeight: 800 }}>{item.number_1 || 'Missing #1'}</span>
+                          {item.g1_id && <span style={{ fontSize: '9px', background: '#fef3c7', color: '#92400e', padding: '1px 4px', borderRadius: '3px', fontWeight: 700 }}>GROUP</span>}
                         </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ fontWeight: 800, color: 'var(--primary)' }}>{item.number_2 || 'Missing #2'}</span>
+                          {item.g2_id && <span style={{ fontSize: '9px', background: '#fef3c7', color: '#92400e', padding: '1px 4px', borderRadius: '3px', fontWeight: 700 }}>GROUP</span>}
+                        </div>
+                      </div>
                     </td>
+                    <td><span style={{ fontSize: '12px', fontWeight: 600 }}>{item.couple_label || 'Couple Pack'}</span></td>
+                    <td style={{ fontWeight: 700 }}>₹{item.couple_price}</td>
+                    <td style={{ color: 'var(--danger)', fontWeight: 700 }}>{item.couple_offer_price ? `₹${item.couple_offer_price}` : '-'}</td>
                     <td>
-                      <span style={{ color: item.offer_price ? 'var(--danger)' : 'var(--text-secondary)', fontWeight: 700 }}>
-                        {item.offer_price ? `₹${item.offer_price}` : '-'}
-                      </span>
-                    </td>
-                    <td>
-                      <select 
-                        value={item.number_status} 
-                        className="input-select-inline"
-                        onChange={(e) => handleQuickUpdate(item.number_id, 'number_status', e.target.value)}
-                      >
+                      <select value={item.couple_status} className="input-select-inline" onChange={(e) => handleQuickUpdate(item.couple_id, 'couple_status', e.target.value)}>
                         <option value="available">Available</option>
                         <option value="booked">Booked</option>
                         <option value="sold">Sold</option>
                       </select>
                     </td>
                     <td>
-                      <span style={{ fontSize: '12px', fontWeight: 600, color: '#aaa' }}>{item.dealer_name || 'Direct'}</span>
+                      <button className="btn-icon" onClick={() => setEditingItem(item)}><Edit3 size={15} /></button>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                filteredItems.map(item => (
+                  <tr key={item.group_id}>
+                    <td><input type="checkbox" /></td>
+                    <td><span style={{ fontSize: '11px', color: '#999' }}>#{item.group_id}</span></td>
+                    <td>
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <span style={{ fontWeight: 800 }}>{item.group_name}</span>
+                        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '4px' }}>
+                          {item.members?.map(m => (
+                            <div key={m.member_number_id} style={{ display: 'flex', alignItems: 'center', gap: '2px', background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>
+                              <span style={{ fontSize: '10px' }}>{m.mobile_number || 'N/A'}</span>
+                              {m.member_couple_id && <span style={{ fontSize: '8px', background: 'var(--primary)', color: 'white', padding: '0 3px', borderRadius: '2px', fontWeight: 800 }}>C</span>}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </td>
+                    <td><span style={{ textTransform: 'capitalize', fontSize: '12px' }}>{item.group_type}</span></td>
+                    <td>{item.members?.length} Nos</td>
+                    <td style={{ fontWeight: 700 }}>₹{item.group_price}</td>
+                    <td>
+                      <select value={item.group_status} className="input-select-inline" onChange={(e) => handleQuickUpdate(item.group_id, 'group_status', e.target.value)}>
+                        <option value="available">Available</option>
+                        <option value="booked">Booked</option>
+                        <option value="sold">Sold</option>
+                      </select>
                     </td>
                     <td>
-                      <div style={{ display: 'flex', gap: '4px' }}>
-                        <button className="btn-icon" title="Edit Full" onClick={() => setEditingItem(item)}><Edit3 size={15} /></button>
-                        <button className="btn-icon" title="Delete" style={{ color: 'var(--danger)' }} onClick={() => bulkAction('delete')}><Trash2 size={15} /></button>
-                      </div>
+                      <button className="btn-icon" onClick={() => setEditingItem(item)}><Edit3 size={15} /></button>
                     </td>
                   </tr>
                 ))
@@ -461,54 +672,212 @@ export default function Inventory() {
       {/* Edit Modal */}
       {editingItem && (
         <div className="modal-overlay">
-          <div className="card modal-content" style={{ width: '500px' }}>
+          <div className="card modal-content" style={{ width: '560px', maxHeight: '85vh', overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
-              <h3 style={{ margin: 0 }}>Edit Number: {editingItem.mobile_number}</h3>
+              <h3 style={{ margin: 0 }}>
+                {viewType === 'numbers' ? `Edit Number: ${editingItem.mobile_number}` : 
+                 viewType === 'couples' ? `Edit Couple #${editingItem.couple_id}` : 
+                 `Edit Group: ${editingItem.group_name}`}
+              </h3>
               <X style={{ cursor: 'pointer', color: '#888' }} onClick={() => setEditingItem(null)} />
             </div>
+
+            {/* ── Couple: Show both numbers at top ── */}
+            {viewType === 'couples' && (
+              <div style={{ background: '#f0f4ff', border: '1px solid #d0d8f0', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
+                <div style={{ fontSize: '11px', color: '#666', marginBottom: '6px', fontWeight: 600 }}>Couple Numbers</div>
+                <div style={{ display: 'flex', gap: '16px' }}>
+                  <div>
+                    <span style={{ fontSize: '10px', color: '#999' }}>Number 1</span>
+                    <div style={{ fontWeight: 800, fontSize: '1rem' }}>{editingItem.number_1 || 'N/A'}</div>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '10px', color: '#999' }}>Number 2</span>
+                    <div style={{ fontWeight: 800, fontSize: '1rem', color: 'var(--primary)' }}>{editingItem.number_2 || 'N/A'}</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── Group: Show all members at top ── */}
+            {viewType === 'groups' && (
+              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
+                <div style={{ fontSize: '11px', color: '#92400e', marginBottom: '6px', fontWeight: 600 }}>Group Members ({editingItem.members?.length || 0})</div>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  {editingItem.members?.length > 0 ? editingItem.members.map((m, idx) => (
+                    <div key={idx} style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '6px', padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                      <span style={{ fontWeight: 800, fontSize: '13px' }}>{m.mobile_number || 'N/A'}</span>
+                      <span style={{ fontSize: '9px', color: '#888' }}>ID: {m.member_number_id} • {m.member_status || 'unknown'}</span>
+                    </div>
+                  )) : (
+                    <span style={{ fontSize: '12px', color: '#999' }}>No members found. Use "Repair Relationships" to sync data.</span>
+                  )}
+                </div>
+              </div>
+            )}
             
-            <div key={editingItem.number_id} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <div key={editingItem.number_id || editingItem.couple_id || editingItem.group_id} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+               {/* ── Price Fields (all views) ── */}
                <div className="form-group">
-                 <label>Base Price</label>
-                 <input type="number" className="input" defaultValue={editingItem.base_price || ''} id="edit-base-price" />
+                 <label>{viewType === 'numbers' ? 'Base Price' : (viewType === 'couples' ? 'Couple Price' : 'Group Price')}</label>
+                 <input type="number" className="input" defaultValue={(viewType === 'numbers' ? editingItem.base_price : (viewType === 'couples' ? editingItem.couple_price : editingItem.group_price)) || ''} id="edit-base-price" />
                </div>
                <div className="form-group">
                  <label>Offer Price</label>
-                 <input type="number" className="input" defaultValue={editingItem.offer_price || ''} id="edit-offer-price" />
+                 <input type="number" className="input" defaultValue={(viewType === 'numbers' ? editingItem.offer_price : (viewType === 'couples' ? editingItem.couple_offer_price : editingItem.group_offer_price)) || ''} id="edit-offer-price" />
                </div>
-               <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                 <label>Remarks</label>
-                 <textarea className="input" defaultValue={editingItem.remarks || ''} id="edit-remarks" rows={2} style={{ resize: 'none' }} />
-               </div>
+
+               {/* ── Status (all views) ── */}
                <div className="form-group">
-                 <label>Couple Number ID</label>
-                 <input type="number" className="input" defaultValue={editingItem.couple_number_id || ''} id="edit-couple-id" />
+                 <label>Status</label>
+                 <select className="input" id="edit-status" defaultValue={
+                   viewType === 'numbers' ? (editingItem.number_status || 'available') :
+                   viewType === 'couples' ? (editingItem.couple_status || 'available') :
+                   (editingItem.group_status || 'available')
+                 }>
+                   <option value="available">Available</option>
+                   <option value="booked">Booked</option>
+                   <option value="sold">Sold</option>
+                 </select>
                </div>
-               <div className="form-group">
-                 <label>Group Number ID</label>
-                 <input type="number" className="input" defaultValue={editingItem.group_number_id || ''} id="edit-group-id" />
-               </div>
+
+               {/* ── Numbers-only: Category ── */}
+               {viewType === 'numbers' && (
+                 <div className="form-group">
+                   <label>Category</label>
+                   <select className="input" id="edit-category" defaultValue={editingItem.number_category || 6}>
+                     <option value={1}>Diamond</option>
+                     <option value={2}>Platinum</option>
+                     <option value={3}>Gold</option>
+                     <option value={4}>Silver</option>
+                     <option value={5}>Bronze</option>
+                     <option value={6}>Normal</option>
+                     <option value={7}>Couple</option>
+                     <option value={8}>Business</option>
+                   </select>
+                 </div>
+               )}
+
+               {/* ── Numbers-only: Pattern ── */}
+               {viewType === 'numbers' && (
+                 <div className="form-group">
+                   <label>Pattern Name</label>
+                   <input type="text" className="input" defaultValue={editingItem.pattern_name || ''} id="edit-pattern" />
+                 </div>
+               )}
+
+               {/* ── Numbers-only: Visibility ── */}
+               {viewType === 'numbers' && (
+                 <div className="form-group">
+                   <label>Visibility</label>
+                   <select className="input" id="edit-visibility" defaultValue={editingItem.visibility_status ?? 1}>
+                     <option value={1}>Visible</option>
+                     <option value={0}>Hidden</option>
+                   </select>
+                 </div>
+               )}
+
+               {/* ── Couples: Number ID editing ── */}
+               {viewType === 'couples' && (
+                 <>
+                   <div className="form-group">
+                      <label>Number 1 ID <span style={{ fontSize: '10px', color: 'var(--primary)' }}>({editingItem.number_1 || 'N/A'})</span></label>
+                      <input type="number" className="input" defaultValue={editingItem.number_id_1 || ''} id="edit-n1-id" />
+                   </div>
+                   <div className="form-group">
+                      <label>Number 2 ID <span style={{ fontSize: '10px', color: 'var(--primary)' }}>({editingItem.number_2 || 'N/A'})</span></label>
+                      <input type="number" className="input" defaultValue={editingItem.number_id_2 || ''} id="edit-n2-id" />
+                   </div>
+                   <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                      <label>Couple Label</label>
+                      <input type="text" className="input" defaultValue={editingItem.couple_label || ''} id="edit-couple-label" />
+                   </div>
+                 </>
+               )}
+
+               {/* ── Groups: Name + Member ID editing ── */}
+               {viewType === 'groups' && (
+                 <>
+                   <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                     <label>Group Name</label>
+                     <input type="text" className="input" defaultValue={editingItem.group_name || ''} id="edit-group-name" />
+                   </div>
+                   <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                     <label style={{ marginBottom: '8px', display: 'block' }}>Member Number IDs</label>
+                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                       {editingItem.members?.length > 0 ? editingItem.members.map((m, idx) => (
+                         <div key={idx} style={{ display: 'flex', gap: '8px', alignItems: 'center', background: '#f8fafc', padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                           <div style={{ display: 'flex', flexDirection: 'column', minWidth: '90px' }}>
+                             <span style={{ fontSize: '12px', fontWeight: 700 }}>{m.mobile_number || 'N/A'}</span>
+                             <span style={{ fontSize: '9px', color: '#999' }}>{m.member_status || ''}</span>
+                           </div>
+                           <input type="number" className="input edit-group-member-id" defaultValue={m.member_number_id} style={{ height: '30px', fontSize: '12px', flex: 1 }} />
+                         </div>
+                       )) : (
+                         <span style={{ fontSize: '12px', color: '#999', gridColumn: '1 / -1' }}>No members. Click "Repair" in the header to sync data.</span>
+                       )}
+                     </div>
+                   </div>
+                 </>
+               )}
+
+               {/* ── Numbers-only: Remarks ── */}
+               {viewType === 'numbers' && (
+                 <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                   <label>Remarks</label>
+                   <textarea className="input" defaultValue={editingItem.remarks || ''} id="edit-remarks" rows={2} style={{ resize: 'none' }} />
+                 </div>
+               )}
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px' }}>
               <button className="btn btn-secondary" onClick={() => setEditingItem(null)}>Cancel</button>
               <button className="btn btn-primary" onClick={async () => {
-                const base = document.getElementById('edit-base-price').value;
-                const offer = document.getElementById('edit-offer-price').value;
-                const remarks = document.getElementById('edit-remarks').value;
-                const couple = document.getElementById('edit-couple-id').value;
-                const group = document.getElementById('edit-group-id').value;
-                const res = await putWithAuth(`${API_BASE}/wp_fn_numbers/${editingItem.number_id}`, {
-                  base_price: base,
-                  offer_price: offer,
-                  remarks: remarks,
-                  couple_number_id: couple,
-                  group_number_id: group
-                });
+                let endpoint = `${API_BASE}/wp_fn_numbers/${editingItem.number_id}`;
+                let payload = {};
+                const status = document.getElementById('edit-status').value;
+
+                if (viewType === 'numbers') {
+                  const base = document.getElementById('edit-base-price').value;
+                  const offer = document.getElementById('edit-offer-price').value;
+                  const remarks = document.getElementById('edit-remarks').value;
+                  const category = document.getElementById('edit-category').value;
+                  const pattern = document.getElementById('edit-pattern').value;
+                  const visibility = document.getElementById('edit-visibility').value;
+                  payload = { 
+                    base_price: base, offer_price: offer, remarks, 
+                    number_status: status, number_category: category, 
+                    pattern_name: pattern, visibility_status: visibility 
+                  };
+                } else if (viewType === 'couples') {
+                  endpoint = `${API_BASE}/wp_fn_couple_numbers/${editingItem.couple_id}`;
+                  const base = document.getElementById('edit-base-price').value;
+                  const offer = document.getElementById('edit-offer-price').value;
+                  const n1 = document.getElementById('edit-n1-id').value;
+                  const n2 = document.getElementById('edit-n2-id').value;
+                  const label = document.getElementById('edit-couple-label').value;
+                  payload = { couple_price: base, couple_offer_price: offer, number_id_1: n1, number_id_2: n2, couple_label: label, couple_status: status };
+                } else if (viewType === 'groups') {
+                  endpoint = `${API_BASE}/wp_fn_number_groups/${editingItem.group_id}`;
+                  const base = document.getElementById('edit-base-price').value;
+                  const offer = document.getElementById('edit-offer-price').value;
+                  const groupName = document.getElementById('edit-group-name').value;
+                  
+                  // Collect member IDs
+                  const memberInputs = document.querySelectorAll('.edit-group-member-id');
+                  const memberIds = Array.from(memberInputs).map(i => i.value).filter(v => v);
+                  
+                  payload = { group_price: base, group_offer_price: offer, group_name: groupName, group_status: status, members: memberIds };
+                }
+
+                const res = await putWithAuth(endpoint, payload);
                 if (res.ok) {
                   fetchInventory();
-                  toast.success('Number updated successfully');
+                  fetchStats();
+                  toast.success('Updated successfully');
                   setEditingItem(null);
+                } else {
+                  toast.error('Failed to update. Check console for details.');
                 }
               }}>Save Changes</button>
             </div>

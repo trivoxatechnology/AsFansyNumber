@@ -472,6 +472,11 @@ if ($method === 'POST') {
         handle_upload_process($pdo);
         exit;
     }
+    // ── Bundle Synchronizer: fix orphans ──
+    if ($table === 'sync-bundles') {
+        handle_sync_bundles($pdo);
+        exit;
+    }
 }
 
 // ── 9. Standard CRUD Dispatch ─────────────────────────────────────────────────
@@ -504,7 +509,9 @@ function handle_stats($pdo, $table) {
         $thisMonth = date('Y-m-01');
         $stmt = $pdo->query("
             SELECT
-                COUNT(*) as total,
+                (SELECT COUNT(*) FROM `wp_fn_numbers`) as total,
+                (SELECT COUNT(*) FROM `wp_fn_couple_numbers`) as total_couples,
+                (SELECT COUNT(*) FROM `wp_fn_number_groups` WHERE `group_type` = 'business' OR `group_type` = 'family') as total_groups,
                 SUM(CASE WHEN `number_status` = 'available' THEN 1 ELSE 0 END) as available,
                 SUM(CASE WHEN `number_status` = 'sold' THEN 1 ELSE 0 END) as sold,
                 SUM(CASE WHEN `offer_price` > 0 AND `number_status` = 'available' THEN 1 ELSE 0 END) as on_offer,
@@ -580,17 +587,16 @@ function handle_count($pdo, $table) {
 
 function handle_couples_get($pdo) {
     try {
-        $query = "SELECT cn.couple_id, cn.couple_label, cn.couple_price,
-                         cn.couple_offer_price, cn.couple_status,
-                         n1.mobile_number AS number_1,
-                         n1.base_price    AS price_1,
-                   JOIN wp_fn_numbers n1 ON cn.number_id_1 = n1.number_id
-                   JOIN wp_fn_numbers n2 ON cn.number_id_2 = n2.number_id
-                  WHERE cn.visibility_status = 1
-                    AND cn.couple_status = 'available'
+        $query = "SELECT cn.*,
+                         n1.mobile_number AS number_1, n1.base_price AS price_1, n1.offer_price AS offer_1,
+                         n2.mobile_number AS number_2, n2.base_price AS price_2, n2.offer_price AS offer_2
+                  FROM wp_fn_couple_numbers cn
+                  LEFT JOIN wp_fn_numbers n1 ON cn.number_id_1 = n1.number_id
+                  LEFT JOIN wp_fn_numbers n2 ON cn.number_id_2 = n2.number_id
                   ORDER BY cn.couple_id DESC";
         $stmt = $pdo->query($query);
-        echo json_encode($stmt->fetchAll());
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        echo json_encode($rows);
     } catch (Exception $e) {
         http_response_code(500);
         echo json_encode(["success" => false, "error" => $e->getMessage()]);
@@ -599,23 +605,16 @@ function handle_couples_get($pdo) {
 
 function handle_groups_get($pdo) {
     try {
-        $query = "SELECT g.group_id, g.group_name, g.group_type,
-                         g.group_price, g.group_offer_price, g.group_status,
-                         n.number_id, n.mobile_number, n.base_price,
-                         n.offer_price, n.number_status,
+        $query = "SELECT g.*,
+                         n.number_id as member_number_id, n.mobile_number, n.base_price as member_base_price,
+                         n.offer_price as member_offer_price, n.number_status as member_status,
                          m.sort_order
                   FROM wp_fn_number_groups g
-                  JOIN wp_fn_number_group_members m ON m.group_id = g.group_id
-                  JOIN wp_fn_numbers n ON n.number_id = m.number_id
-                  WHERE g.visibility_status = 1
-                    AND g.group_status = 'available'
-                    AND n.number_status = 'available'
+                  LEFT JOIN wp_fn_number_group_members m ON m.group_id = g.group_id
+                  LEFT JOIN wp_fn_numbers n ON n.number_id = m.number_id
                   ORDER BY g.group_id DESC, m.sort_order ASC";
         $stmt = $pdo->query($query);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        // Group rows by group_id for easier frontend consumption if needed, 
-        // though query order is enough for flat list.
         echo json_encode($rows);
     } catch (Exception $e) {
         http_response_code(500);
@@ -1726,7 +1725,10 @@ function handle_post($pdo, $table, $input) {
     }
 
     $safeInput = [];
+    $members = $input['members'] ?? null;
+    
     foreach ($input as $k => $v) {
+        if ($k === 'members') continue; // specialized logic below
         if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $k)) {
             $safeInput[$k] = $v;
         }
@@ -1737,13 +1739,38 @@ function handle_post($pdo, $table, $input) {
         return;
     }
 
-    $cols = '`' . implode('`, `', array_keys($safeInput)) . '`';
-    $ph   = implode(', ', array_fill(0, count($safeInput), '?'));
-    $stmt = $pdo->prepare("INSERT INTO `$table` ($cols) VALUES ($ph)");
     try {
+        $pdo->beginTransaction();
+        $cols = '`' . implode('`, `', array_keys($safeInput)) . '`';
+        $ph   = implode(', ', array_fill(0, count($safeInput), '?'));
+        $stmt = $pdo->prepare("INSERT INTO `$table` ($cols) VALUES ($ph)");
         $stmt->execute(array_values($safeInput));
-        echo json_encode(["success" => true, "id" => $pdo->lastInsertId()]);
+        $newId = $pdo->lastInsertId();
+
+        // Specialized logic for group members
+        if ($table === 'wp_fn_number_groups' && is_array($members)) {
+            $ins = $pdo->prepare("INSERT INTO `wp_fn_number_group_members` (group_id, number_id, sort_order) VALUES (?, ?, ?)");
+            $updNum = $pdo->prepare("UPDATE `wp_fn_numbers` SET group_id = ? WHERE number_id = ?");
+            foreach ($members as $idx => $m_id) {
+                if ($m_id) {
+                    $ins->execute([$newId, $m_id, $idx]);
+                    $updNum->execute([$newId, $m_id]);
+                }
+            }
+        }
+
+        // Specialized logic for couple numbers synchronization
+        if ($table === 'wp_fn_couple_numbers') {
+            $n1 = $safeInput['number_id_1'] ?? null;
+            $n2 = $safeInput['number_id_2'] ?? null;
+            if ($n1) $pdo->prepare("UPDATE `wp_fn_numbers` SET couple_id = ? WHERE number_id = ?")->execute([$newId, $n1]);
+            if ($n2) $pdo->prepare("UPDATE `wp_fn_numbers` SET couple_id = ? WHERE number_id = ?")->execute([$newId, $n2]);
+        }
+
+        $pdo->commit();
+        echo json_encode(["success" => true, "id" => $newId]);
     } catch (PDOException $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
         http_response_code(400);
         echo json_encode(["error" => $e->getMessage()]);
     }
@@ -1777,10 +1804,31 @@ function handle_put($pdo, $table, $id, $input) {
         "UPDATE `$table` SET " . implode(', ', $sets) . " WHERE `$pk` = ?"
     );
     try {
+        $pdo->beginTransaction();
         $vals[] = $id;
         $stmt->execute($vals);
+
+        // Specialized logic for group members
+        if ($table === 'wp_fn_number_groups' && isset($input['members']) && is_array($input['members'])) {
+            // Unset old group_id from numbers
+            $pdo->prepare("UPDATE `wp_fn_numbers` SET group_id = NULL WHERE group_id = ?")->execute([$id]);
+            // Remove existing from junction table
+            $pdo->prepare("DELETE FROM `wp_fn_number_group_members` WHERE `group_id` = ?")->execute([$id]);
+            // Re-insert & Update numbers
+            $ins = $pdo->prepare("INSERT INTO `wp_fn_number_group_members` (group_id, number_id, sort_order) VALUES (?, ?, ?)");
+            $updNum = $pdo->prepare("UPDATE `wp_fn_numbers` SET group_id = ? WHERE number_id = ?");
+            foreach ($input['members'] as $idx => $m_id) {
+                if ($m_id) {
+                    $ins->execute([$id, $m_id, $idx]);
+                    $updNum->execute([$id, $m_id]);
+                }
+            }
+        }
+
+        $pdo->commit();
         echo json_encode(["success" => true, "affected" => $stmt->rowCount()]);
     } catch (PDOException $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
         http_response_code(400);
         echo json_encode(["error" => $e->getMessage()]);
     }
@@ -1828,4 +1876,38 @@ function get_pk_name($table) {
         'wp_fn_background_jobs'     => 'job_id',
     ];
     return $map[$table] ?? 'id';
+}
+
+function handle_sync_bundles($pdo) {
+    try {
+        $pdo->beginTransaction();
+        $fixed_groups = 0;
+        $fixed_couples = 0;
+
+        // 1. Sync Groups: numbers table -> junction table
+        $stmt = $pdo->query("SELECT number_id, group_id FROM wp_fn_numbers WHERE group_id IS NOT NULL AND group_id > 0");
+        $nums = $stmt->fetchAll();
+        $ins = $pdo->prepare("INSERT IGNORE INTO wp_fn_number_group_members (group_id, number_id, sort_order) VALUES (?, ?, ?)");
+        foreach ($nums as $n) {
+            $ins->execute([$n['group_id'], $n['number_id'], 0]);
+            $fixed_groups++;
+        }
+
+        // 2. Sync Couples: couple table -> numbers table
+        $stmt = $pdo->query("SELECT couple_id, number_id_1, number_id_2 FROM wp_fn_couple_numbers");
+        $couples = $stmt->fetchAll();
+        $upd = $pdo->prepare("UPDATE wp_fn_numbers SET couple_id = ? WHERE number_id = ?");
+        foreach ($couples as $c) {
+            $upd->execute([$c['couple_id'], $c['number_id_1']]);
+            $upd->execute([$c['couple_id'], $c['number_id_2']]);
+            $fixed_couples++;
+        }
+
+        $pdo->commit();
+        echo json_encode(["success" => true, "groups_synced" => $fixed_groups, "couples_synced" => $fixed_couples]);
+    } catch (Exception $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        http_response_code(500);
+        echo json_encode(["success" => false, "error" => $e->getMessage()]);
+    }
 }

@@ -272,8 +272,8 @@ function fn_route_couples($pdo) {
                          n2.number_id     AS number_id_2,
                          cn.updated_at
                   FROM wp_fn_couple_numbers cn
-                  JOIN wp_fn_numbers n1 ON cn.number_id_1 = n1.number_id
-                  JOIN wp_fn_numbers n2 ON cn.number_id_2 = n2.number_id
+                  LEFT JOIN wp_fn_numbers n1 ON cn.number_id_1 = n1.number_id
+                  LEFT JOIN wp_fn_numbers n2 ON cn.number_id_2 = n2.number_id
                   WHERE cn.visibility_status = 1
                     AND cn.couple_status = 'available'
                   ORDER BY cn.couple_id DESC";
@@ -293,11 +293,10 @@ function fn_route_groups($pdo) {
                          n.offer_price, n.number_category, n.number_status,
                          m.sort_order
                   FROM wp_fn_number_groups g
-                  JOIN wp_fn_number_group_members m ON m.group_id = g.group_id
-                  JOIN wp_fn_numbers n ON n.number_id = m.number_id
+                  LEFT JOIN wp_fn_number_group_members m ON m.group_id = g.group_id
+                  LEFT JOIN wp_fn_numbers n ON n.number_id = m.number_id
                   WHERE g.visibility_status = 1
                     AND g.group_status = 'available'
-                    AND n.number_status = 'available'
                   ORDER BY g.group_id DESC, m.sort_order ASC";
         $stmt = $pdo->query($query);
         echo json_encode($stmt->fetchAll());
